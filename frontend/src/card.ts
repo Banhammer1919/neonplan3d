@@ -345,6 +345,7 @@ clearTimeout(this.cleanTimer);
               .holograms=${this._config?.holograms ?? null}
               .floorThumbs=${this.thumbs}
               .roomLabels=${c?.room_names !== false}
+              .pinStyle=${c?.pin_style === "hud" ? "hud" : "compact"}
               .controlsRight=${c?.controls_side === "right"}
               .keepView=${c?.keep_view === true}
               .floorStack=${c?.floor_stack ?? "dim"}

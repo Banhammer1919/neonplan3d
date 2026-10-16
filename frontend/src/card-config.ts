@@ -63,6 +63,8 @@ export interface CardConfig {
   controls_hide_after?: number;
   /** Room names in 3D (default true). */
   room_names?: boolean;
+  /** Look of the room labels: compact (default) or hud – a wall-tablet badge with the room name and a line each for temperature and humidity (with heatmap "values"). */
+  pin_style?: "compact" | "hud";
   /** An opened floor with the floors below it dimmed (default), stacked, or on its own. */
   floor_stack?: "dim" | "stacked" | "single";
   /** A button for full screen (hides the dashboard around the card). */

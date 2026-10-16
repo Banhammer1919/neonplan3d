@@ -4,6 +4,12 @@ All notable changes to NeonPlan 3D. The full notes in German and English are on 
 [releases page](https://github.com/Mastershort/neonplan3d/releases). Ideas and votes:
 [Discussions → Ideas](https://github.com/Mastershort/neonplan3d/discussions/categories/ideas).
 
+## 1.19.1 (fork Banhammer1919)
+
+### New
+
+- Card option `pin_style: hud`: room labels as wall-tablet badges with the room name and an icon line each for temperature, humidity and CO₂ (with `heatmap: values`).
+
 ## 1.19.0
 
 ### New

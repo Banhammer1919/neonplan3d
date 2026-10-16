@@ -112,7 +112,7 @@ import { floorCounts, floorInfoText, personsInRooms } from "../presence.ts";
 import { controls, tokens } from "../styles.ts";
 import type { HassEntity, HomeAssistant } from "../types.ts";
 import { countView, diagnosticsActive, recordFrame, watchDiagnostics } from "../diagnostics.ts";
-import type { DeviceMarker, FloorplanViewer, FloorStack, RobotInfo, Quality, ScreenState, SoundSource, SurfaceGrab, ViewerStats, WallMode } from "../viewer/viewer3d.ts";
+import type { DeviceMarker, FloorplanViewer, FloorStack, PinStyle, RobotInfo, Quality, ScreenState, SoundSource, SurfaceGrab, ViewerStats, WallMode } from "../viewer/viewer3d.ts";
 import { wallLayout } from "../camera-wall.ts";
 import { watchedEntities } from "../watched.ts";
 import type { HistorySpec, ReplayInfo } from "../timetravel/types.ts";
@@ -218,6 +218,7 @@ export class Fp3dView3d extends LitElement {
     clean: { attribute: false },
     cleanButton: { attribute: false },
     roomLabels: { attribute: false },
+    pinStyle: { attribute: false },
     floorStack: { attribute: false },
     panelOpen: { attribute: false },
     controlsRight: { attribute: false },
@@ -375,6 +376,8 @@ export class Fp3dView3d extends LitElement {
   declare cleanButton: boolean;
   /** Room names in 3D (cards can switch them off). */
   declare roomLabels: boolean;
+  /** Look of the room labels: "compact" (name and a small line) or "hud" (a badge with icon lines, for wall tablets). */
+  declare pinStyle: PinStyle;
   /** Floors below an opened floor: dimmed, stacked (the house up to it) or hidden. */
   declare floorStack: FloorStack;
   private declare _thumbs: { floorId: string; url: string }[];
@@ -554,6 +557,7 @@ export class Fp3dView3d extends LitElement {
     this.clean = false;
     this.cleanButton = false;
     this.roomLabels = true;
+    this.pinStyle = "compact";
     this.floorStack = "dim";
     this._low = false;
     this.panelOpen = false;
@@ -705,6 +709,7 @@ export class Fp3dView3d extends LitElement {
         },
       });
       this.viewer.setWallMode(this.wallMode);
+      this.viewer.setPinStyle(this.pinStyle);
       this.viewer.setKeepView(this.keepView);
       this.viewer.setTheme(this.theme);
       this.viewer.setAccent(this.accent ?? null);
@@ -792,6 +797,7 @@ export class Fp3dView3d extends LitElement {
     if (changed.has("floorId")) v.setFloor(this.floorId);
     if (changed.has("roomId") && (this.roomId || changed.get("roomId"))) v.selectRoom(this.roomId);
     if (changed.has("wallMode")) v.setWallMode(this.wallMode);
+    if (changed.has("pinStyle")) v.setPinStyle(this.pinStyle);
     if (changed.has("keepView")) v.setKeepView(this.keepView);
     if (changed.has("explode")) v.setExplode(this.explode);
     if (changed.has("keepRoof")) v.setKeepRoof(this.keepRoof);
@@ -4131,6 +4137,36 @@ export class Fp3dView3d extends LitElement {
         font-weight: 500;
         opacity: 0.9;
         font-variant-numeric: tabular-nums;
+      }
+      /* HUD badges (wall tablet): the room name on top, a line with an icon per value */
+      .fp3d-pin-hud {
+        display: grid;
+        gap: 3px;
+        padding: 7px 12px 8px;
+        border-radius: 12px;
+        text-align: center;
+        font-size: 13.5px;
+        border-color: color-mix(in srgb, var(--fp3d-accent) 55%, var(--fp3d-line));
+        box-shadow: 0 0 18px rgba(55, 224, 255, 0.18), var(--fp3d-shadow);
+      }
+      .fp3d-pin-hud .fp3d-hud-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        font: 600 12.5px var(--fp3d-font);
+        font-variant-numeric: tabular-nums;
+        color: var(--fp3d-text);
+        opacity: 0.95;
+      }
+      .fp3d-pin-hud .fp3d-hud-row svg {
+        width: 14px;
+        height: 14px;
+        color: var(--fp3d-accent);
+        flex: none;
+      }
+      .fp3d-pin-hud .fp3d-hud-row.fp3d-hud-humidity svg {
+        color: #6fb7ff;
       }
       .fp3d-pin {
         position: absolute;

@@ -87,6 +87,18 @@ export type { OpeningState } from "./openings.ts";
 export type Quality = "auto" | "low" | "high";
 export type WallMode = "auto" | "cut";
 
+/** Look of the room labels: compact (name + small values line) or hud (badge with an icon line per value). */
+export type PinStyle = "compact" | "hud";
+
+const HUD_ICONS: Record<string, string> = {
+  // stroke paths in a 24×24 box (like icons.ts): thermometer, water drop, CO₂ circle
+  temperature: "M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0zM12 9v9",
+  humidity: "M12 3s6 7 6 11.5a6 6 0 0 1-12 0C6 10 12 3 12 3z",
+  co2: "M4 12a8 8 0 1 1 16 0 8 8 0 0 1-16 0zM9 10.5v3M15 10.5v3M9 12h6",
+};
+const hudIcon = (kind: string): string =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${HUD_ICONS[kind] ?? HUD_ICONS.temperature}"/></svg>`;
+
 export interface ViewerOptions {
   quality?: Quality;
   /** Pull floors apart in the house view (default true). */
@@ -507,6 +519,7 @@ export class FloorplanViewer {
   private floorInfo = new Map<string, string>();
   /** Text behind the room names (the "values" heat mode: temperature, humidity, CO₂ per room). */
   private roomInfo = new Map<string, string>();
+  private pinStyle: PinStyle = "compact";
   /** Ground grid texture, made when the ground first shows (the tablet level never shows it). */
   private groundTexture: CanvasTexture | null = null;
   private devices: DeviceMarker[] = [];
@@ -1306,15 +1319,36 @@ export class FloorplanViewer {
     this.invalidate();
   }
 
-  /** The room name, with a line of values below it when there is one. */
+  /** The room name, with a line of values below it when there is one (HUD style: an icon line per value). */
   private fillRoomPin(pin: HTMLElement, name: string, info: string | undefined): void {
     pin.textContent = name || "–";
-    if (info) {
+    pin.classList.toggle("fp3d-pin-hud", this.pinStyle === "hud");
+    if (info && this.pinStyle === "hud") {
+      // the "values" mode joins the readings with " · ": temperature (°), humidity (%), CO₂ (ppm)
+      for (const part of info.split(" · ")) {
+        const kind = part.includes("ppm") ? "co2" : part.includes("%") ? "humidity" : "temperature";
+        const row = document.createElement("span");
+        row.className = `fp3d-hud-row fp3d-hud-${kind}`;
+        row.innerHTML = hudIcon(kind);
+        row.append(document.createTextNode(part));
+        pin.append(row);
+      }
+      pin.classList.add("fp3d-pin-info");
+    } else if (info) {
       const small = document.createElement("small");
       small.textContent = info;
       pin.append(small);
       pin.classList.add("fp3d-pin-info");
     } else pin.classList.remove("fp3d-pin-info");
+  }
+
+  /** Look of the room labels (compact or hud); the pins are rebuilt. */
+  setPinStyle(style: PinStyle): void {
+    if (style === this.pinStyle) return;
+    this.pinStyle = style;
+    for (const fv of this.floors) for (const rp of fv.roomPins) this.fillRoomPin(rp.pin, rp.room.name, this.roomInfo.get(rp.room.id));
+    this.labelsDirty = true;
+    this.invalidate();
   }
 
   /** Values behind the room names (the "values" heat mode); an empty map clears them. */
