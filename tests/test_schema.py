@@ -53,6 +53,8 @@ def test_room_label_position() -> None:
     """A room may place its label (name, climate badge) away from the centroid."""
     assert ROOM_SCHEMA(ROOM)["label"] is None
     assert ROOM_SCHEMA({**ROOM, "label": [1.5, 2]})["label"] == [1.5, 2.0]
+    assert ROOM_SCHEMA(ROOM)["label_scale"] is None
+    assert ROOM_SCHEMA({**ROOM, "label_scale": 1.4})["label_scale"] == 1.4
 
 
 def test_room_ceiling_height() -> None:

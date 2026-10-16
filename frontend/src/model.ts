@@ -26,6 +26,8 @@ export interface Room {
   start_view?: StartView | null;
   /** Where the room's label (name, temperature badge) sits, in metres; null = the centroid of the room. */
   label?: Vec2 | null;
+  /** Size of the room's label and badge relative to the default (0.5–2); null = 1. */
+  label_scale?: number | null;
   points: Vec2[];
   floor_material: string;
   /** Entities shown in the room's panel although they are not in the plan. */

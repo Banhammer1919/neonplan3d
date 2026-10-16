@@ -4162,8 +4162,9 @@ export class FloorplanViewer {
         }
         const px = ((v.x + 1) / 2) * w;
         const py = ((1 - v.y) / 2) * h;
-        // HUD badges always fit inside their room: scaled down to the room's footprint on screen (wall tablet, top-down view)
-        let scale = 1;
+        // the room's own label size, and HUD badges always fit inside their room: scaled down to the room's
+        // footprint on screen (wall tablet, top-down view)
+        let scale = rp.room.label_scale ?? 1;
         if (this.pinStyle === "hud") {
           if (rp.pin.hidden) rp.pin.hidden = false;
           let size = this.pinSizes.get(rp.pin);
@@ -4183,10 +4184,10 @@ export class FloorplanViewer {
           }
           const roomW = Math.max(0, sx1 - sx0 - 12);
           const roomH = Math.max(0, sy1 - sy0 - 12);
-          if (size.w > 0 && size.h > 0) scale = Math.max(0.45, Math.min(1, roomW / size.w, roomH / size.h));
-          scale = Math.round(scale * 100) / 100;
+          if (size.w > 0 && size.h > 0) scale = Math.max(0.3, Math.min(scale, roomW / size.w, roomH / size.h));
         }
-        this.place(rp.pin, `translate(${px}px, ${py}px) translate(-50%, -50%)${scale < 1 ? ` scale(${scale})` : ""}`);
+        scale = Math.round(scale * 100) / 100;
+        this.place(rp.pin, `translate(${px}px, ${py}px) translate(-50%, -50%)${scale !== 1 ? ` scale(${scale})` : ""}`);
       }
     }
   }

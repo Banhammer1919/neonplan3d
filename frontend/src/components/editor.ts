@@ -9040,8 +9040,9 @@ export class Fp3dEditor extends LitElement {
       ${this.renderEdgeHighlight()}
       <g pointer-events="none">${floor.rooms.map((r) => {
         const [cx, cy] = this.toScreen(r.label ?? centroid(r.points));
-        return svg`<text class="fp3d-room-name" x=${cx} y=${cy - 2}>${r.name}</text>
-          <text class="fp3d-room-area" x=${cx} y=${cy + 14}>${this.area(polygonArea(r.points))}</text>`;
+        const s = r.label_scale ?? 1;
+        return svg`<g transform=${`translate(${cx} ${cy}) scale(${s})`}><text class="fp3d-room-name" x="0" y="-2">${r.name}</text>
+          <text class="fp3d-room-area" x="0" y="14">${this.area(polygonArea(r.points))}</text></g>`;
       })}</g>
       ${this.renderLabelHandle(floor)}
     `;
@@ -9052,10 +9053,11 @@ export class Fp3dEditor extends LitElement {
     const r = floor.rooms.find((x) => x.id === this._roomId);
     if (!r || !this.isAdmin || (this._tool !== "select" && this._tool !== "polygon" && this._tool !== "rect")) return nothing;
     const [cx, cy] = this.toScreen(r.label ?? centroid(r.points));
-    return svg`<g data-room-label=${r.id} class=${`fp3d-label-handle${r.label ? " fp3d-label-moved" : ""}`}>
+    const s = r.label_scale ?? 1;
+    return svg`<g data-room-label=${r.id} class=${`fp3d-label-handle${r.label || r.label_scale ? " fp3d-label-moved" : ""}`} transform=${`translate(${cx} ${cy}) scale(${s})`}>
       <title>${this.t("room_label_hint")}</title>
-      <rect x=${cx - 44} y=${cy - 16} width="88" height="38" rx="8" />
-      <circle cx=${cx} cy=${cy + 28} r="5" />
+      <rect x="-44" y="-16" width="88" height="38" rx="8" />
+      <circle cx="0" cy="28" r="5" />
     </g>`;
   }
 
@@ -9777,7 +9779,15 @@ export class Fp3dEditor extends LitElement {
         <button class="fp3d-btn" title=${this.t("room_start_view_hint")} ?disabled=${!admin} @click=${() => this.rememberRoomView()}>${this.t("room_start_view")}</button>
         ${room.start_view ? html`<button class="fp3d-btn" title=${this.t("room_start_view_reset")} ?disabled=${!admin} @click=${() => this.updateRoom({ start_view: null })}>↺</button>` : nothing}
       </div>
-      <p class="fp3d-sub">${this.t("room_label_hint")}${room.label ? html` <button class="fp3d-link" ?disabled=${!admin} @click=${() => this.updateRoom({ label: null })}>${this.t("room_label_reset")}</button>` : nothing}</p>
+      <p class="fp3d-sub">${this.t("room_label_hint")}${room.label || room.label_scale ? html` <button class="fp3d-link" ?disabled=${!admin} @click=${() => this.updateRoom({ label: null, label_scale: null })}>${this.t("room_label_reset")}</button>` : nothing}</p>
+      <label class="fp3d-field fp3d-wide"
+        >${this.t("room_label_size")} · ${Math.round((room.label_scale ?? 1) * 100)} %
+        <input type="range" min="0.5" max="2" step="0.1" .value=${String(room.label_scale ?? 1)} ?disabled=${!admin}
+          @change=${(e: Event) => {
+            const v = Number((e.target as HTMLInputElement).value);
+            this.updateRoom({ label_scale: Math.abs(v - 1) < 0.01 ? null : v });
+          }}
+      /></label>
       <p class="fp3d-sub" title=${this.t("room_area_net_hint")}>${this.t("room_area_net", { a: this.area(polygonArea(room.points)), n: this.area(netRoomArea(room, this.floor!, { exterior: this._doc.settings.wall_exterior, interior: this._doc.settings.wall_interior })) })}</p>
       <p class="fp3d-sub fp3d-room-id">${this.t("room_id")} <code title=${this.t("license_copy")} @click=${() => void navigator.clipboard?.writeText(room.id).catch(() => undefined)}>${room.id}</code></p>
       ${this.renderEdgeHeights(room)} ${this.renderRoomClimate(room)} ${this.renderRoomOpenings(room)}

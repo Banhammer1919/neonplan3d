@@ -4,6 +4,12 @@ All notable changes to NeonPlan 3D. The full notes in German and English are on 
 [releases page](https://github.com/Mastershort/neonplan3d/releases). Ideas and votes:
 [Discussions → Ideas](https://github.com/Mastershort/neonplan3d/discussions/categories/ideas).
 
+## 1.19.4 (fork Banhammer1919)
+
+### New
+
+- Room labels have a size slider (50–200 %) in the room panel; the badge in 3D and the label in the plan scale with it (`label_scale`). HUD badges still shrink to fit their room.
+
 ## 1.19.3 (fork Banhammer1919)
 
 ### New

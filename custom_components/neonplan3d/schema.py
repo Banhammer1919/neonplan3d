@@ -62,6 +62,8 @@ ROOM_SCHEMA = vol.Schema(
         vol.Optional("start_view", default=None): vol.Any(None, START_VIEW_SCHEMA),
         # where the room's label (name, climate badge) sits in the plan (None = the room's centroid)
         vol.Optional("label", default=None): vol.Any(None, _POINT),
+        # size of the label and badge relative to the default (None = 1)
+        vol.Optional("label_scale", default=None): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0.5, max=2))),
         # entities shown in the room's panel although they are not in the plan
         vol.Optional("panel", default=list): vol.All([vol.All(str, vol.Length(max=255))], vol.Length(max=100)),
         # entities of the area kept out of the room panel

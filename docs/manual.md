@@ -973,7 +973,7 @@ heatmap: none           # none | temperature | humidity | co2
 room_panel: true        # tapping a room opens the room panel
 room_names: true
 pin_style: compact      # compact | hud: wall-tablet badges with an icon line for temperature and humidity (with heatmap: values)
-# Where a badge sits is set per room in the editor: drag the dashed handle under the room name ("Back to the centre" resets it).
+# Where a badge sits and how big it is are set per room in the editor: drag the dashed handle under the room name, slider "Label size" ("Reset" clears both).
 controls: true          # switches in the card, or a list: walls, floors, temperature, humidity, co2
 controls_hidden: false  # true: start with the controls hidden (only the 3D view); an eye at the bottom left brings them back
 controls_hide_after: 0  # seconds without a touch after which the controls disappear (0 = never); a touch shows them again
