@@ -2031,7 +2031,7 @@ export class FloorplanViewer {
         this.fillRoomPin(pin, room.name, this.roomInfo.get(room.id));
         pin.addEventListener("click", () => this.options.onRoomTap?.(floor.id, room.id));
         this.labels.append(pin);
-        const [cx, cz] = centroid(room.points);
+        const [cx, cz] = room.label ?? centroid(room.points);
         let rbox = { x0: cx, x1: cx, z0: cz, z1: cz };
         for (const [x, z] of room.points) {
           bbox ??= { x0: x, x1: x, z0: z, z1: z };

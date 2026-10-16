@@ -4,6 +4,12 @@ All notable changes to NeonPlan 3D. The full notes in German and English are on 
 [releases page](https://github.com/Mastershort/neonplan3d/releases). Ideas and votes:
 [Discussions → Ideas](https://github.com/Mastershort/neonplan3d/discussions/categories/ideas).
 
+## 1.19.3 (fork Banhammer1919)
+
+### New
+
+- Room labels can be moved: a dashed handle under the selected room's name in the editor drags the label, and the room badge in 3D (temperature, humidity) sits at the same spot. Stored per room as `label`; "Back to the centre" resets it.
+
 ## 1.19.2 (fork Banhammer1919)
 
 ### Changed

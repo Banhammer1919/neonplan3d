@@ -164,6 +164,7 @@ type Drag =
   | { kind: "roofvertex"; id: string; index: number; base: Building; moved: boolean }
   | { kind: "cablept"; id: string; index: number; base: Building; moved: boolean }
   | { kind: "holopt"; base: Building; moved: boolean }
+  | { kind: "roomlabel"; roomId: string; base: Building; moved: boolean }
   | { kind: "bgmove"; start: Vec2; bx: number; bz: number; base: Building; moved: boolean }
   | { kind: "bgscale"; base: Building; moved: boolean }
   | { kind: "bgrotate"; base: Building; moved: boolean; start: number; rot: number }
@@ -179,7 +180,7 @@ interface Guides {
 }
 
 /** Drags that change the document live (restored when cancelled, recorded in the history when done). */
-const EDIT_DRAGS = new Set(["vertex", "room", "device", "opening", "furniture", "furnset", "rotate", "resize", "outdoor", "roofmove", "roofcorner", "roofvertex", "outvertex", "outbox", "pipept", "poolport", "pooldev", "pooljoint", "solarmove", "solarturn", "cablept", "holopt", "bgmove", "bgscale", "bgrotate"]);
+const EDIT_DRAGS = new Set(["vertex", "room", "device", "opening", "furniture", "furnset", "rotate", "resize", "outdoor", "roofmove", "roofcorner", "roofvertex", "outvertex", "outbox", "pipept", "poolport", "pooldev", "pooljoint", "solarmove", "solarturn", "cablept", "holopt", "roomlabel", "bgmove", "bgscale", "bgrotate"]);
 
 const HISTORY = 100;
 
@@ -1701,6 +1702,12 @@ export class Fp3dEditor extends LitElement {
       this.drag = this.isAdmin ? { kind: "outdoor", id, start: world, startScreen: local, base: this._doc, moved: false } : { kind: "pan", last: local };
       return;
     }
+    const labelEl = target.closest("[data-room-label]");
+    if (labelEl && this.isAdmin) {
+      // the handle under the selected room's name: drags the label (and the badge in 3D) to another spot
+      this.drag = { kind: "roomlabel", roomId: labelEl.getAttribute("data-room-label")!, base: this._doc, moved: false };
+      return;
+    }
     const roomId = target.closest("[data-room]")?.getAttribute("data-room") ?? this.roomAt(world);
     if (roomId) {
       if (roomId !== this._roomId) this._vertex = null;
@@ -2053,6 +2060,19 @@ export class Fp3dEditor extends LitElement {
         );
         break;
       }
+      case "roomlabel": {
+        drag.moved = true;
+        const p = this.snap(world, undefined, e.altKey);
+        this.change(
+          (_, floor) => {
+            const room = floor.rooms.find((r) => r.id === drag.roomId);
+            if (room) room.label = [round(p[0]), round(p[1])];
+          },
+          drag.base,
+          false,
+        );
+        break;
+      }
       case "holopt": {
         drag.moved = true;
         const p = this.snap(world, undefined, e.altKey);
@@ -2342,6 +2362,7 @@ export class Fp3dEditor extends LitElement {
         else if (drag.kind === "poolport" || drag.kind === "pooljoint") this.openCard(drag.pool, `${drag.kind === "poolport" ? "port" : "joint"}:${drag.id}`);
         break;
       case "holopt":
+      case "roomlabel":
       case "bgmove":
       case "bgscale":
       case "bgrotate":
@@ -9018,11 +9039,24 @@ export class Fp3dEditor extends LitElement {
       })}</g>
       ${this.renderEdgeHighlight()}
       <g pointer-events="none">${floor.rooms.map((r) => {
-        const [cx, cy] = this.toScreen(centroid(r.points));
+        const [cx, cy] = this.toScreen(r.label ?? centroid(r.points));
         return svg`<text class="fp3d-room-name" x=${cx} y=${cy - 2}>${r.name}</text>
           <text class="fp3d-room-area" x=${cx} y=${cy + 14}>${this.area(polygonArea(r.points))}</text>`;
       })}</g>
+      ${this.renderLabelHandle(floor)}
     `;
+  }
+
+  /** A handle under the selected room's name: dragging it moves the label and the room's badge in 3D. */
+  private renderLabelHandle(floor: Floor) {
+    const r = floor.rooms.find((x) => x.id === this._roomId);
+    if (!r || !this.isAdmin || (this._tool !== "select" && this._tool !== "polygon" && this._tool !== "rect")) return nothing;
+    const [cx, cy] = this.toScreen(r.label ?? centroid(r.points));
+    return svg`<g data-room-label=${r.id} class=${`fp3d-label-handle${r.label ? " fp3d-label-moved" : ""}`}>
+      <title>${this.t("room_label_hint")}</title>
+      <rect x=${cx - 44} y=${cy - 16} width="88" height="38" rx="8" />
+      <circle cx=${cx} cy=${cy + 28} r="5" />
+    </g>`;
   }
 
   /** The wall of the selected room whose row in the wall height list is hovered. */
@@ -9743,6 +9777,7 @@ export class Fp3dEditor extends LitElement {
         <button class="fp3d-btn" title=${this.t("room_start_view_hint")} ?disabled=${!admin} @click=${() => this.rememberRoomView()}>${this.t("room_start_view")}</button>
         ${room.start_view ? html`<button class="fp3d-btn" title=${this.t("room_start_view_reset")} ?disabled=${!admin} @click=${() => this.updateRoom({ start_view: null })}>↺</button>` : nothing}
       </div>
+      <p class="fp3d-sub">${this.t("room_label_hint")}${room.label ? html` <button class="fp3d-link" ?disabled=${!admin} @click=${() => this.updateRoom({ label: null })}>${this.t("room_label_reset")}</button>` : nothing}</p>
       <p class="fp3d-sub" title=${this.t("room_area_net_hint")}>${this.t("room_area_net", { a: this.area(polygonArea(room.points)), n: this.area(netRoomArea(room, this.floor!, { exterior: this._doc.settings.wall_exterior, interior: this._doc.settings.wall_interior })) })}</p>
       <p class="fp3d-sub fp3d-room-id">${this.t("room_id")} <code title=${this.t("license_copy")} @click=${() => void navigator.clipboard?.writeText(room.id).catch(() => undefined)}>${room.id}</code></p>
       ${this.renderEdgeHeights(room)} ${this.renderRoomClimate(room)} ${this.renderRoomOpenings(room)}
@@ -12458,6 +12493,25 @@ export class Fp3dEditor extends LitElement {
         fill: var(--fp3d-text);
         font: 600 13px var(--fp3d-title-font);
         text-anchor: middle;
+      }
+      .fp3d-label-handle {
+        cursor: move;
+      }
+      .fp3d-label-handle rect {
+        fill: transparent;
+        stroke: var(--fp3d-accent);
+        stroke-width: 1px;
+        stroke-dasharray: 4 3;
+        opacity: 0.55;
+      }
+      .fp3d-label-handle circle {
+        fill: var(--fp3d-accent);
+        stroke: var(--fp3d-bg);
+        stroke-width: 2px;
+      }
+      .fp3d-label-handle:hover rect,
+      .fp3d-label-moved rect {
+        opacity: 0.9;
       }
       .fp3d-room-area {
         fill: var(--fp3d-muted);

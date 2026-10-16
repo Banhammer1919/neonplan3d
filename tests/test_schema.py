@@ -49,6 +49,12 @@ def test_inverted_contact_and_plant_card_offsets() -> None:
     assert (moved["plant_right"], moved["plant_up"]) == (1.5, -2.0)
 
 
+def test_room_label_position() -> None:
+    """A room may place its label (name, climate badge) away from the centroid."""
+    assert ROOM_SCHEMA(ROOM)["label"] is None
+    assert ROOM_SCHEMA({**ROOM, "label": [1.5, 2]})["label"] == [1.5, 2.0]
+
+
 def test_room_ceiling_height() -> None:
     """A room may have a ceiling of its own (#30); none keeps the floor height."""
     assert "ceiling_height" not in ROOM_SCHEMA(ROOM)

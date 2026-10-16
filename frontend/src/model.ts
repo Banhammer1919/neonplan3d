@@ -24,6 +24,8 @@ export interface Room {
   area_id: string | null;
   /** The camera the room opens with when it is tapped in 3D (null: framed from above). */
   start_view?: StartView | null;
+  /** Where the room's label (name, temperature badge) sits, in metres; null = the centroid of the room. */
+  label?: Vec2 | null;
   points: Vec2[];
   floor_material: string;
   /** Entities shown in the room's panel although they are not in the plan. */
