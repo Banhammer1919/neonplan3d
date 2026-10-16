@@ -4,6 +4,12 @@ All notable changes to NeonPlan 3D. The full notes in German and English are on 
 [releases page](https://github.com/Mastershort/neonplan3d/releases). Ideas and votes:
 [Discussions → Ideas](https://github.com/Mastershort/neonplan3d/discussions/categories/ideas).
 
+## 1.19.2 (fork Banhammer1919)
+
+### Changed
+
+- HUD room badges (`pin_style: hud`) are more compact and scale down so they always fit inside their room's footprint on screen.
+
 ## 1.19.1 (fork Banhammer1919)
 
 ### New

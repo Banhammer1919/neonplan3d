@@ -446,7 +446,7 @@ interface FloorView {
   lampRanges: Map<string, { start: number; end: number }>;
   /** Room box and room labels with their centres, so labels are placed without recomputing them. */
   bbox: { x0: number; x1: number; z0: number; z1: number } | null;
-  roomPins: { pin: HTMLButtonElement; room: Room; cx: number; cz: number }[];
+  roomPins: { pin: HTMLButtonElement; room: Room; cx: number; cz: number; box: { x0: number; x1: number; z0: number; z1: number } }[];
   /** Size of the floor label, measured once per text (reading it every frame forces a layout). */
   labelSize: { w: number; h: number } | null;
   materials: FloorMaterials;
@@ -520,6 +520,8 @@ export class FloorplanViewer {
   /** Text behind the room names (the "values" heat mode: temperature, humidity, CO₂ per room). */
   private roomInfo = new Map<string, string>();
   private pinStyle: PinStyle = "compact";
+  /** Natural size of each room pin (unscaled), measured once after it was filled. */
+  private pinSizes = new WeakMap<HTMLElement, { w: number; h: number }>();
   /** Ground grid texture, made when the ground first shows (the tablet level never shows it). */
   private groundTexture: CanvasTexture | null = null;
   private devices: DeviceMarker[] = [];
@@ -1321,6 +1323,7 @@ export class FloorplanViewer {
 
   /** The room name, with a line of values below it when there is one (HUD style: an icon line per value). */
   private fillRoomPin(pin: HTMLElement, name: string, info: string | undefined): void {
+    this.pinSizes.delete(pin);
     pin.textContent = name || "–";
     pin.classList.toggle("fp3d-pin-hud", this.pinStyle === "hud");
     if (info && this.pinStyle === "hud") {
@@ -2029,14 +2032,16 @@ export class FloorplanViewer {
         pin.addEventListener("click", () => this.options.onRoomTap?.(floor.id, room.id));
         this.labels.append(pin);
         const [cx, cz] = centroid(room.points);
-        roomPins.push({ pin, room, cx, cz });
+        let rbox = { x0: cx, x1: cx, z0: cz, z1: cz };
         for (const [x, z] of room.points) {
           bbox ??= { x0: x, x1: x, z0: z, z1: z };
           bbox.x0 = Math.min(bbox.x0, x);
           bbox.x1 = Math.max(bbox.x1, x);
           bbox.z0 = Math.min(bbox.z0, z);
           bbox.z1 = Math.max(bbox.z1, z);
+          rbox = { x0: Math.min(rbox.x0, x), x1: Math.max(rbox.x1, x), z0: Math.min(rbox.z0, z), z1: Math.max(rbox.z1, z) };
         }
+        roomPins.push({ pin, room, cx, cz, box: rbox });
       }
       this.floors.push({
         floor,
@@ -4151,7 +4156,37 @@ export class FloorplanViewer {
         }
         v.set(rp.cx, y, rp.cz).project(this.camera);
         const off = v.z > 1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1;
-        this.place(rp.pin, off ? null : `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * h}px) translate(-50%, -50%)`);
+        if (off) {
+          this.place(rp.pin, null);
+          continue;
+        }
+        const px = ((v.x + 1) / 2) * w;
+        const py = ((1 - v.y) / 2) * h;
+        // HUD badges always fit inside their room: scaled down to the room's footprint on screen (wall tablet, top-down view)
+        let scale = 1;
+        if (this.pinStyle === "hud") {
+          if (rp.pin.hidden) rp.pin.hidden = false;
+          let size = this.pinSizes.get(rp.pin);
+          if (!size) {
+            size = { w: rp.pin.offsetWidth, h: rp.pin.offsetHeight };
+            if (size.w > 0) this.pinSizes.set(rp.pin, size);
+          }
+          let sx0 = Infinity, sx1 = -Infinity, sy0 = Infinity, sy1 = -Infinity;
+          for (const x of [rp.box.x0, rp.box.x1]) {
+            for (const z of [rp.box.z0, rp.box.z1]) {
+              v.set(x, y, z).project(this.camera);
+              const sx = ((v.x + 1) / 2) * w;
+              const sy = ((1 - v.y) / 2) * h;
+              sx0 = Math.min(sx0, sx); sx1 = Math.max(sx1, sx);
+              sy0 = Math.min(sy0, sy); sy1 = Math.max(sy1, sy);
+            }
+          }
+          const roomW = Math.max(0, sx1 - sx0 - 12);
+          const roomH = Math.max(0, sy1 - sy0 - 12);
+          if (size.w > 0 && size.h > 0) scale = Math.max(0.45, Math.min(1, roomW / size.w, roomH / size.h));
+          scale = Math.round(scale * 100) / 100;
+        }
+        this.place(rp.pin, `translate(${px}px, ${py}px) translate(-50%, -50%)${scale < 1 ? ` scale(${scale})` : ""}`);
       }
     }
   }

@@ -4141,27 +4141,29 @@ export class Fp3dView3d extends LitElement {
       /* HUD badges (wall tablet): the room name on top, a line with an icon per value */
       .fp3d-pin-hud {
         display: grid;
-        gap: 3px;
-        padding: 7px 12px 8px;
-        border-radius: 12px;
+        gap: 1px;
+        padding: 4px 8px 5px;
+        border-radius: 9px;
         text-align: center;
-        font-size: 13.5px;
+        font-size: 11.5px;
+        line-height: 1.2;
         border-color: color-mix(in srgb, var(--fp3d-accent) 55%, var(--fp3d-line));
-        box-shadow: 0 0 18px rgba(55, 224, 255, 0.18), var(--fp3d-shadow);
+        box-shadow: 0 0 14px rgba(55, 224, 255, 0.16), var(--fp3d-shadow);
       }
       .fp3d-pin-hud .fp3d-hud-row {
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 5px;
-        font: 600 12.5px var(--fp3d-font);
+        gap: 3px;
+        font: 600 11px var(--fp3d-font);
+        line-height: 1.2;
         font-variant-numeric: tabular-nums;
         color: var(--fp3d-text);
         opacity: 0.95;
       }
       .fp3d-pin-hud .fp3d-hud-row svg {
-        width: 14px;
-        height: 14px;
+        width: 12px;
+        height: 12px;
         color: var(--fp3d-accent);
         flex: none;
       }
