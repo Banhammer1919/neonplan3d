@@ -14,12 +14,13 @@ from homeassistant.loader import async_get_integration
 import voluptuous as vol
 
 from . import license as lic
-from .const import DATA_DIAGNOSTICS, DOMAIN, SIGNAL_BUILDING_UPDATED
+from .const import DATA_ASK, DATA_DIAGNOSTICS, DATA_VOICE, DOMAIN, SIGNAL_ASK, SIGNAL_BUILDING_UPDATED
 from .diagnostics_report import DiagnosticsError, DiagnosticsReporter
-from .packs import MAX_PACK_SIZE, PackError, parts_of, verify_pack
+from .packs import MAX_PACK_SIZE, PackError, module_sha, parts_of, verify_pack
 from .schema import BUILDING_SCHEMA, IMAGE_DATA
 from .storage import FloorplanData, complete
 from .timetravel import ws_timetravel_history
+from .voice import SENTENCE_MODES, AskBroker, VoiceSettings
 
 _IMAGE_ID = vol.All(str, vol.Length(min=1, max=64), vol.Match(r"^[A-Za-z0-9_\-.]+$"))
 
@@ -41,6 +42,9 @@ def async_register_commands(hass: HomeAssistant) -> None:
         ws_packs_import,
         ws_packs_remove,
         ws_packs_install,
+        ws_modules_code,
+        ws_modules_review,
+        ws_modules_approve,
         ws_license_get,
         ws_license_activate,
         ws_license_remove,
@@ -52,6 +56,10 @@ def async_register_commands(hass: HomeAssistant) -> None:
         ws_diagnostics_set,
         ws_diagnostics_delete,
         ws_diagnostics_client,
+        ws_voice_subscribe,
+        ws_voice_answer,
+        ws_voice_settings,
+        ws_voice_settings_set,
     ):
         websocket_api.async_register_command(hass, command)
 
@@ -200,7 +208,60 @@ def ws_packs_list(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
     """Return the imported furniture packs (every user needs them to see the furniture)."""
     if (data := _data(hass, connection, msg)) is None:
         return
-    connection.send_result(msg["id"], {"packs": data.packs})
+    connection.send_result(msg["id"], {"packs": [_without_code(p) for p in data.packs]})
+
+
+def _without_code(pack: dict[str, Any]) -> dict[str, Any]:
+    """A module's code is fetched on its own (neonplan3d/modules/code): the list stays small. It says whether an
+    admin approved the code and whether an update waits for approval."""
+    module = pack.get("module")
+    if not isinstance(module, dict):
+        return pack
+    sha = module_sha(pack)
+    code = module.get("code")
+    if not isinstance(code, str):
+        code = ""
+    info = {k: v for k, v in module.items() if k != "code"}
+    info.update({"approved": bool(sha) and pack.get("approved") == sha, "size": len(code), "sha": sha})
+    slim = {k: v for k, v in pack.items() if k not in ("pending", "approved")}
+    slim["module"] = info
+    pending = pack.get("pending")
+    if isinstance(pending, dict):
+        pcode = (pending.get("module") or {}).get("code") or ""
+        slim["pending"] = {"release": pending.get("release") or 1, "size": len(pcode), "sha": module_sha(pending)}
+    # the signed source carries the code as well
+    if isinstance(slim.get("source"), dict):
+        slim["source"] = {**slim["source"], "module": {k: v for k, v in module.items() if k != "code"}}
+    return slim
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "neonplan3d/modules/code", vol.Required("pack_id"): vol.All(str, vol.Length(max=64))}
+)
+@callback
+def ws_modules_code(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """The code of an installed module (every user runs the modules, like everyone sees the furniture)."""
+    if (data := _data(hass, connection, msg)) is None:
+        return
+    pack = next((p for p in data.packs if p["id"] == msg["pack_id"]), None)
+    module = pack.get("module") if pack else None
+    if pack is None or not isinstance(module, dict) or not isinstance(module.get("code"), str):
+        connection.send_error(msg["id"], "not_found", "no such module")
+        return
+    # module code runs only after an admin has seen and approved exactly this code
+    if pack.get("approved") != module_sha(pack):
+        connection.send_error(msg["id"], "not_approved", "the module waits for an admin's approval")
+        return
+    connection.send_result(
+        msg["id"],
+        {
+            "id": pack["id"],
+            "release": pack.get("release") or 1,
+            "api": module["api"],
+            "kind": module["kind"],
+            "code": module["code"],
+        },
+    )
 
 
 @websocket_api.websocket_command(
@@ -220,17 +281,18 @@ async def ws_packs_import(hass: HomeAssistant, connection: websocket_api.ActiveC
     except PackError as err:
         connection.send_error(msg["id"], err.code, err.detail or err.code)
         return
-    await data.async_add_pack(payload, parts_of(msg["pack"]))
-    connection.send_result(
-        msg["id"],
-        {
-            "id": payload["id"],
-            "name": payload["name"],
-            "publisher": payload["publisher"],
-            "licensee": payload["licensee"],
-            "items": len(payload["items"]),
-        },
-    )
+    waits = await data.async_add_pack(payload, parts_of(msg["pack"]))
+    result = {
+        "id": payload["id"],
+        "name": payload["name"],
+        "publisher": payload["publisher"],
+        "licensee": payload["licensee"],
+        "items": len(payload["items"]),
+    }
+    if waits:
+        # module code: runs only once an admin approved it on the extensions page
+        result["approval"] = True
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command(
@@ -478,3 +540,117 @@ def ws_diagnostics_client(hass: HomeAssistant, connection: websocket_api.ActiveC
         return
     reporter.add_client(msg.get("client"), msg.get("errors"))
     connection.send_result(msg["id"], {"enabled": True})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "neonplan3d/voice/subscribe"})
+@callback
+def ws_voice_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Every sentence Assist (or the service `neonplan3d.ask`) hands to the views; each open view listens."""
+
+    @callback
+    def forward(ask: dict[str, Any]) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], ask))
+
+    connection.subscriptions[msg["id"]] = async_dispatcher_connect(hass, SIGNAL_ASK, forward)
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "neonplan3d/voice/answer",
+        vol.Required("ask_id"): vol.All(str, vol.Length(max=64)),
+        vol.Required("text"): vol.All(str, vol.Length(max=2000)),
+        vol.Optional("answered", default=True): bool,
+    }
+)
+@callback
+def ws_voice_answer(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """A view's answer to a sentence: the first one is taken, later ones are told so (`taken: false`)."""
+    broker: AskBroker | None = hass.data.get(DATA_ASK)
+    taken = broker.answer(msg["ask_id"], msg["text"], msg["answered"]) if broker else False
+    connection.send_result(msg["id"], {"taken": taken})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "neonplan3d/voice/settings"})
+@callback
+def ws_voice_settings(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """The voice settings: which sentences Assist hands to NeonPlan."""
+    settings: VoiceSettings | None = hass.data.get(DATA_VOICE)
+    connection.send_result(msg["id"], {"sentences": settings.sentences if settings else "off"})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "neonplan3d/voice/settings/set", vol.Required("sentences"): vol.In(SENTENCE_MODES)}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_voice_settings_set(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Sets which sentences Assist hands to NeonPlan; the sentence files are rewritten and Assist reloads them."""
+    settings: VoiceSettings | None = hass.data.get(DATA_VOICE)
+    if settings is None:
+        connection.send_error(msg["id"], "not_ready", "voice settings not loaded")
+        return
+    try:
+        kept = await settings.async_set_sentences(msg["sentences"])
+    except OSError as err:
+        connection.send_error(msg["id"], "write_failed", str(err))
+        return
+    connection.send_result(msg["id"], {"sentences": settings.sentences, "kept": kept})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "neonplan3d/modules/review",
+        vol.Required("pack_id"): vol.All(str, vol.Length(max=64)),
+        vol.Optional("pending", default=False): bool,
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_modules_review(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """A module's code for an admin to read before approving it (the installed code or the waiting update)."""
+    if (data := _data(hass, connection, msg)) is None:
+        return
+    pack = next((p for p in data.packs if p["id"] == msg["pack_id"]), None)
+    target = (pack or {}).get("pending") if msg["pending"] else pack
+    module = target.get("module") if isinstance(target, dict) else None
+    if not isinstance(target, dict) or not isinstance(module, dict) or not isinstance(module.get("code"), str):
+        connection.send_error(msg["id"], "not_found", "no such module")
+        return
+    connection.send_result(
+        msg["id"],
+        {
+            "id": target["id"],
+            "name": target.get("name"),
+            "publisher": target.get("publisher"),
+            "licensee": target.get("licensee"),
+            "release": target.get("release") or 1,
+            "api": module["api"],
+            "kind": module["kind"],
+            "sha": module_sha(target),
+            "code": module["code"],
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "neonplan3d/modules/approve",
+        vol.Required("pack_id"): vol.All(str, vol.Length(max=64)),
+        vol.Required("sha"): vol.All(str, vol.Length(min=64, max=64)),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_modules_approve(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """An admin approves exactly the code they reviewed (by its fingerprint); from then on it runs."""
+    if (data := _data(hass, connection, msg)) is None:
+        return
+    if not await data.async_approve_module(msg["pack_id"], msg["sha"]):
+        connection.send_error(msg["id"], "not_found", "no module code with this fingerprint")
+        return
+    connection.send_result(msg["id"], {"approved": True})

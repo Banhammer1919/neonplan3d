@@ -1,6 +1,6 @@
-// Records frames of the preview (invented demo data) for the README animation: the house turns with its
-// solar roof and energy cards, the view flies into the ground floor (music cards over the speakers), the
-// central menu switches every light off and on again, then the kitchen with its speaker card and room panel.
+// Records frames of the preview (invented demo data) for the README animation: the house turns with its solar roof
+// and energy cards, voice control opens the living room ("Show the living room"), the doorbell rings and the live
+// director flies to the front door and looks through its camera, then back to the whole house.
 // Usage (from frontend/): node record-gif.mjs <frame-dir>; then python ../tools/make-gif.py <frame-dir> <out.gif>
 
 import { createServer } from "node:http";
@@ -39,8 +39,8 @@ const frame = async (wait = 40) => {
   await sleep(wait);
   await page.screenshot({ path: join(outDir, `f${String(n++).padStart(4, "0")}.png`) });
 };
-const hold = async (count) => {
-  for (let i = 0; i < count; i++) await frame(60);
+const hold = async (count, wait = 70) => {
+  for (let i = 0; i < count; i++) await frame(wait);
 };
 const clickText = (text) =>
   page.evaluate((t) => {
@@ -66,43 +66,61 @@ const turn = async (dx, steps, y = 470) => {
   }
   await page.mouse.up();
 };
+// runs code with `panel` and `view` (the 3D view) at hand
+const inPage = (code) =>
+  page.evaluate(async (code) => {
+    const panel = document.querySelector("neonplan3d-panel");
+    const view = panel.shadowRoot.querySelector("fp3d-view3d");
+    return new Function("panel", "view", `return (async () => { ${code} })()`)(panel, view);
+  }, code);
 
-// the lights of the ground floor go off and come back on (through the demo's Home Assistant mock)
-const lights = (service) =>
-  page.evaluate((service) => {
-    const hass = document.querySelector("neonplan3d-panel").hass;
-    const ids = Object.keys(hass.states).filter((id) => id.startsWith("light.") && hass.areas[hass.entities[id]?.area_id]?.floor_id === "erdgeschoss");
-    hass.callService("light", service, { entity_id: ids });
-  }, service);
+// the live director with the doorbell switched on, on this "device" (the demo's mock Home Assistant)
+await inPage(`
+  const { building } = await panel.hass.callWS({ type: "neonplan3d/building/get" });
+  building.settings.director = { doorbell: true, hold: 60 };
+  await panel.hass.callWS({ type: "neonplan3d/building/save", building });
+  localStorage.setItem("neonplan3d.director", "1");
+  localStorage.setItem("neonplan3d.voice", "1");
+  panel._director = true;
+  panel._voiceHere = true;
+`);
+await sleep(1500);
+// the director looks once at the doorbell as it is now (it notices a ring as a change against that)
+await inPage(`panel.hass = { ...panel.hass, states: { ...panel.hass.states } };`);
+await sleep(500);
 
-// the star above the magnifier: the central menu of the 3D view
-const view = () => 'document.querySelector("neonplan3d-panel").shadowRoot.querySelector("fp3d-view3d")';
-const central = (open) => page.evaluate((code, open) => {
-  const v = new Function("return " + code)();
-  v._central = open;
-}, view(), open);
-const centralButton = (label) => page.evaluate((code, label) => {
-  const v = new Function("return " + code)();
-  const b = [...v.shadowRoot.querySelectorAll(".fp3d-central .fp3d-btn")].find((x) => x.textContent.trim() === label);
-  b?.click();
-}, view(), label);
-
+// 1. the house turns
 await hold(4);
-await turn(560, 44);
+await turn(420, 34);
+await hold(3);
+
+// 2. voice control: "Show the living room" – the microphone listens, the view flies into the room
+await inPage(`view._voice = { phase: "listen", text: "Listening …" };`);
+await hold(10);
+await inPage(`
+  view._voice = { phase: "done", text: "“Show the living room” → Wohnzimmer" };
+  view.fire("floor-tap", { floorId: "eg" });
+  setTimeout(() => view.fire("room-tap", { floorId: "eg", roomId: "wohnen" }), 60);
+`);
+await hold(26, 80);
+
+// 3. the doorbell rings: the live director flies to the front door and looks through its camera
+await inPage(`
+  view._voice = null;
+  const st = panel.hass.states["event.haustuer_klingel"];
+  panel.hass = { ...panel.hass, states: { ...panel.hass.states, "event.haustuer_klingel": { ...st, state: new Date().toISOString() } } };
+`);
+await hold(4, 90);
+console.log("after the ring:", await inPage(`return JSON.stringify({ room: view.roomId, through: view._through?.entity ?? null, shot: view.directing.current?.shot.kind ?? null })`));
+await hold(26, 90);
+
+// 4. back to the whole house
+await clickText("Back to the view");
+await inPage(`view.fire("floor-tap", { floorId: null });`);
+await hold(16, 90);
+await turn(-260, 22);
 await hold(4);
-await clickText("Erdgeschoss");
-for (let i = 0; i < 16; i++) await frame(70);
-await turn(-220, 18);
-await hold(5);
-await central(true);
-await hold(6);
-await centralButton("Off");
-for (let i = 0; i < 12; i++) await frame(110);
-await centralButton("On");
-for (let i = 0; i < 12; i++) await frame(110);
-await central(false);
-await clickText("Küche");
-for (let i = 0; i < 24; i++) await frame(80);
+
 console.log(`${n} frames in ${outDir}`);
 await browser.close();
 server.close();

@@ -5,11 +5,11 @@ before that module has arrived; the card then stays "Custom element doesn't exis
 sidebar page is opened (#252). Lovelace waits for its resources before it draws cards, so the card's bundle is
 kept in the resource list as well, in storage mode only (YAML resources belong to the user).
 
-While Home Assistant starts, its frontend is served before this integration has set up its static path, so a
-dashboard (a wall tablet reloading itself) may ask for the bundle too early, get nothing and keep "Configuration
-error" until the next reload (#461). The resource is therefore a small loader in `www/neonplan3d/`, which Home
-Assistant serves as /local from the start: it loads the bundle and tries again every few seconds while it is not
-there yet. Without a `www` folder at startup (/local is then not served) the bundle itself stays the resource.
+While Home Assistant starts, a dashboard (a wall tablet reloading itself) may ask for the bundle before it is
+there and keep "Configuration error" until the next reload (#461). The resource is therefore a small loader that
+loads the bundle and tries again every few seconds while it is not there yet. It is served from the integration's
+own path (registered in async_setup, as early as possible); nothing is written into the user's `www` folder; a
+loader that older versions left in `www/neonplan3d/` is removed.
 """
 
 from __future__ import annotations
@@ -28,10 +28,12 @@ _LOGGER = logging.getLogger(__name__)
 
 LOADER_DIR = "neonplan3d"
 LOADER_FILE = "neonplan3d-loader.js"
-LOADER_URL = f"/local/{LOADER_DIR}/{LOADER_FILE}"
+LOADER_URL = f"{URL_BASE}/{LOADER_FILE}"
+# where versions before 1.23 put the loader (in the user's www folder): cleaned up
+OLD_LOADER_URL = f"/local/{LOADER_DIR}/{LOADER_FILE}"
 
 # tries every 5 s for 15 minutes; the first try is awaited, so a dashboard normally waits for the card as before
-_LOADER = """// NeonPlan 3D: loads the dashboard card. Written by the integration; changes here are overwritten.
+_LOADER = """// NeonPlan 3D: loads the dashboard card. Served from the integration's own path, never written to disk.
 // While Home Assistant is still starting, the card's script is not served yet: then it tries again (#461).
 const url = "{url}";
 const tag = "neonplan3d-card";
@@ -57,18 +59,8 @@ def loader_source(bundle_url: str) -> str:
     return _LOADER.format(url=bundle_url.replace("\\", "").replace('"', ""))
 
 
-def write_loader(www: Path, bundle_url: str) -> None:
-    """Writes (or rewrites) the loader into the www folder (created when missing: /local then works next start)."""
-    folder = www / LOADER_DIR
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / LOADER_FILE
-    text = loader_source(bundle_url)
-    if not path.exists() or path.read_text(encoding="utf-8") != text:
-        path.write_text(text, encoding="utf-8")
-
-
 def remove_loader(www: Path) -> None:
-    """Takes the loader (and its folder, when empty) away again."""
+    """Takes a loader older versions wrote into www (and its folder, when empty) away again."""
     folder = www / LOADER_DIR
     (folder / LOADER_FILE).unlink(missing_ok=True)
     with contextlib.suppress(OSError):
@@ -135,7 +127,7 @@ async def async_remove_card_resource(hass: HomeAssistant) -> None:
         await resources.async_get_info()
         for item in list(resources.async_items()):
             url = str(item.get("url", ""))
-            if url.startswith(f"{URL_BASE}/") or url.split("?")[0] == LOADER_URL:
+            if url.startswith(f"{URL_BASE}/") or url.split("?")[0] == OLD_LOADER_URL:
                 await resources.async_delete_item(item["id"])
     except Exception:
         _LOGGER.debug("Could not remove the dashboard resource", exc_info=True)

@@ -1,12 +1,70 @@
-// Pool Pro: the pipes of a pool as runs – where their nodes sit (ports, devices, T-pieces), turning an older
-// level pipe into one with a height per point, splitting a pipe for a T-piece, and drawing them on a wall.
-// Pure functions shared by the 3D view and the editor's wall view.
+// Pipes of a pool as runs – where their nodes sit (ports, devices, T-pieces), turning an older level pipe into
+// one with a height per point, splitting a pipe for a T-piece, drawing them on a wall and as 3D pieces. Pure
+// geometry shared by the 3D view and the editor's wall view; what flows in them is a module's business (Pool Pro).
 
 import { pointInPolygon, POOL_DEVICES, POOL_VALVE_Y, poolFloorY, poolWaterY, type Building, type Floor, type OutdoorArea, type PoolJoint, type PoolPipe, type Vec2 } from "./model.ts";
 import { mountBase } from "./packs.ts";
 import { nearestOnPath, pathLength, pipePath, pointAlong, PIPE_HEIGHT, type NodeAt, type P3 } from "./geometry/runs.ts";
 import { toWall, type WallFrame } from "./geometry/wall-frame.ts";
 import { jointPortAt, portAt, splitNode } from "./pool-ports.ts";
+
+/** Every pool with links on these floors (the module decides what the links mean). */
+export function poolAreas(floors: readonly Floor[]): { floor: Floor; area: OutdoorArea }[] {
+  return floors.flatMap((floor) => (floor.outdoor ?? []).filter((a) => a.type === "pool" && a.pool && a.points.length >= 3).map((area) => ({ floor, area })));
+}
+
+/** A piece of pipe for the 3D view (floor coordinates, y up from the floor), in the shape of the energy cables. */
+export interface PipePiece {
+  floorId: string;
+  a: [number, number, number];
+  b: [number, number, number];
+  dist: number;
+  power: number;
+  color: [number, number, number];
+}
+
+/** The colour of a pipe nothing flows in. */
+export const PIPE_IDLE: [number, number, number] = [0.25, 0.7, 1];
+/** Speed of the dots in a pipe that carries water (as if it were watts on a cable). */
+const PIPE_POWER = 900;
+
+/** The pipes as 3D pieces along their paths (see pipePath), coloured by what flows in them (a module says). */
+export function pipePieces(pipes: readonly PoolPipe[], flows: ReadonlyMap<string, { active: boolean; color: [number, number, number] }>, nodeAt: NodeAt, shape: (path: P3[], p: PoolPipe) => P3[] = (x) => x): PipePiece[] {
+  const out: PipePiece[] = [];
+  for (const p of pipes) {
+    const pts = shape(pipePath(p, nodeAt), p);
+    if (pts.length < 2) continue;
+    const f = flows.get(p.id);
+    const color = f?.color ?? PIPE_IDLE;
+    let dist = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const [p0, p1] = [pts[i - 1], pts[i]];
+      const len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]);
+      if (len < 0.01) continue;
+      out.push({ floorId: p.floor_id, a: p0, b: p1, dist, power: f?.active ? PIPE_POWER : 0, color });
+      dist += len;
+    }
+  }
+  return out;
+}
+
+/** The point on a closed outline nearest to p (a skimmer or an inlet sits on the pool's rim). */
+export function nearestOnOutline(points: readonly [number, number][], p: [number, number]): [number, number] {
+  let best: [number, number] = points[0] ?? p;
+  let bestD = Infinity;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const len2 = dx * dx + dz * dz;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / len2)) : 0;
+    const q: [number, number] = [a[0] + dx * t, a[1] + dz * t];
+    const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    if (d < bestD) [best, bestD] = [q, d];
+  }
+  return best;
+}
 
 /** Where the pipes of a pool end: its ports, the pool devices (on any floor, hung ones higher) and its T-pieces. */
 export function poolNodeAt(b: Building, floor: Floor, area: OutdoorArea): NodeAt {

@@ -2,7 +2,7 @@
 // furniture has the type "pack:<pack id>:<item id>". Every bundle (main, editor, 3D) keeps its own
 // registry, filled with setPacks() from the packs the backend returns.
 
-import { builtinBase, ELECTRIC_FURNITURE, FURNITURE_SIZE, LIFT_SPOTS, spotDepth, surfaceHeight, WALL_LAMP_Y, type Floor, type Furniture } from "./model.ts";
+import { builtinBase, techBase, ELECTRIC_FURNITURE, FURNITURE_SIZE, LIFT_SPOTS, spotDepth, surfaceHeight, WALL_LAMP_Y, type Floor, type Furniture } from "./model.ts";
 import type { LampModel } from "./viewer/viewer3d.ts";
 
 /** A cooking zone of a pack cooktop: a thin disc lying on the item's top. */
@@ -37,6 +37,8 @@ export interface PackPart {
   glow?: boolean;
   /** A screen: shows the linked media player's app colour and picture on its front (+z). */
   screen?: boolean;
+  /** The measures that stay when the item is resized: "w", "d", "h" or several ("wdh"). */
+  fix?: string;
   /** Loft: centre and extent of the top rectangle (defaults: the same as the bottom). */
   tx?: number;
   tz?: number;
@@ -71,8 +73,16 @@ export interface PackItem {
   hole?: boolean;
   /** A lamp: how its light spreads. */
   light?: LampModel;
+  /** Parts (fractions of the size); a part's `fix` ("w", "d", "h" or several) keeps that measure when the item is resized. */
   parts: PackPart[];
   symbol?: PackSymbol[];
+  /** Library (pack format since 1.23): what it is, the rooms it is made for, words that find it. */
+  group?: string;
+  room?: string[];
+  tags?: string[];
+  /** Variants of one thing (a table in three lengths) share a family; the variant names the chip, by language. */
+  family?: string;
+  variant?: Record<string, string>;
 }
 
 export interface FurniturePack {
@@ -88,6 +98,11 @@ export interface FurniturePack {
   /** Pro features the pack unlocks (see features.ts). */
   features?: string[];
   items: PackItem[];
+  /** A module (code the shop delivers; see modules.ts) – the code itself is fetched apart. It runs only once an
+   * admin approved exactly this code (`approved`); `sha` is the code's fingerprint, `size` its length. */
+  module?: { api: number; kind: string; approved?: boolean; size?: number; sha?: string };
+  /** A new release of the module code that waits for an admin's approval (the approved one keeps running). */
+  pending?: { release: number; size: number; sha: string };
   imported_at?: number;
 }
 
@@ -118,9 +133,50 @@ export function isPackType(type: string): boolean {
   return type.startsWith("pack:");
 }
 
+/**
+ * Pack items with parts that move with a cover (#511): a motorised curtain opens to both sides, a roll-down projection
+ * screen comes down from its roller. The packs stay as they are; NeonPlan knows these items by their id.
+ */
+export type PackMotion = "curtain" | "screen";
+
+export function packMotion(type: string): PackMotion | null {
+  if (!isPackType(type)) return null;
+  if (type.endsWith(":curtain_motor")) return "curtain";
+  if (type.endsWith(":screen_roll")) return "screen";
+  return null;
+}
+
+/** The parts that move: the curtain's fabric; the screen's cloth and bottom bar (everything but its roller). */
+export function packMovingPart(kind: PackMotion, p: PackPart): boolean {
+  return kind === "curtain" ? p.color === "fabric" : p.shape !== "cyl";
+}
+
 /** A robot vacuum: the built-in dock, or one from a pack (the smart home pack's robot with its dock, #470). */
 export function isRobotVacuum(type: string): boolean {
   return type === "robot_vacuum" || (isPackType(type) && type.endsWith(":robot_vacuum"));
+}
+
+/**
+ * A pack's robot vacuum model shows the dock at the back and the robot in front of it (+z). The robot's own parts
+ * are left out of the static model and drive around as the viewer's robot instead (#645).
+ */
+export function packRobotPart(p: Pick<PackPart, "z">): boolean {
+  return p.z > 0.05;
+}
+
+/** Where the pack's robot sits in its model: the centre of its largest disc (fraction of the depth; 0.227 when unknown). */
+export function packRobotCentre(item: PackItem | undefined): number {
+  const discs = (item?.parts ?? []).filter((p) => p.shape === "cyl" && packRobotPart(p));
+  if (!discs.length) return 0.227;
+  return discs.reduce((a, b) => (b.w * b.d > a.w * a.d ? b : a)).z;
+}
+
+/**
+ * A pack's heater with hot water (a heat pump's indoor unit, a gas boiler, a buffer tank, a hot water tank): besides a
+ * climate entity it takes a water_heater entity like the built-in water heater (#645).
+ */
+export function isPackHeater(type: string): boolean {
+  return isPackType(type) && /:(heat_pump_indoor|gas_boiler|buffer_tank|water_heater)$/.test(type);
 }
 
 /** The pack item of a furniture type (undefined for built-in types and removed packs). */
@@ -219,16 +275,19 @@ export function packName(pack: { id: string; name: string }, language: string): 
 }
 
 /** Height of the bottom of a pack item, a wall light or an LED strip above the floor (0 for other built-in furniture). */
-export function mountBase(floor: Floor, f: Pick<Furniture, "type" | "x" | "z" | "h"> & { mount_y?: number | null }): number {
+export function mountBase(floor: Floor, f: Pick<Furniture, "type" | "x" | "z" | "h"> & { mount_y?: number | null; variant?: string | null }): number {
   const item = packItem(f.type);
   if (f.mount_y != null) return f.mount_y;
+  // an access point under the ceiling, a slim water heater on the wall (drawn from 0 and lifted by this)
+  const tech = techBase(f, floor.height);
+  if (tech !== null) return tech;
   // wall lights at the usual height, LED strips just under the ceiling
   if (f.type === "lamp_wall") return WALL_LAMP_Y;
   if (LIFT_SPOTS.has(f.type)) return Math.max(0, floor.height - spotDepth(f.type, f.h));
   if (f.type === "led_strip") return Math.max(0, floor.height - 0.04 - Math.max(0.02, f.h));
   switch (item?.mount) {
     case "surface":
-      return surfaceHeight(floor, f.x, f.z);
+      return surfaceHeight(floor, f.x, f.z, f.h);
     case "wall":
       return item.wall_y ?? 1;
     case "ceiling":

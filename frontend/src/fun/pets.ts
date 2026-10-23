@@ -7,7 +7,7 @@
 
 import type * as THREE from "three";
 import type { Building, Floor, Furniture, Pet, Vec2 } from "../model.ts";
-import type { FloorMap } from "../viewer/walk.ts";
+import type { FloorMap, Obstacle } from "../viewer/walk.ts";
 
 /** The three.js classes the pets need, lent by the 3D bundle (it has no ready-made spheres or boxes: shapes are made here). */
 export type FunLib = Pick<typeof THREE, "Group" | "Mesh" | "MeshBasicMaterial" | "CanvasTexture" | "Color" | "PlaneGeometry" | "BufferGeometry" | "Float32BufferAttribute"> & { DoubleSide: typeof THREE.DoubleSide };
@@ -16,6 +16,11 @@ export type FunLib = Pick<typeof THREE, "Group" | "Mesh" | "MeshBasicMaterial" |
 export interface PetViewer {
   floorMap: Map<string, { group: THREE.Group; floor: Floor }>;
   invalidate(): void;
+  /** A decoration moved: a frame soon (on the tablet level at its slower pace, none while it rests). */
+  animate(): void;
+  /** The tablet level, and whether its decorative animations rest (nobody touched the view for a while). */
+  readonly low: boolean;
+  readonly resting: boolean;
 }
 
 export interface PetsContext {
@@ -283,6 +288,20 @@ interface Rug {
 }
 
 /** Rugs and mats of a floor (a built-in rug or a pack's, "rug"/"carpet"/"mat" in its name, at most 6 cm high). */
+/**
+ * The furniture the pets walk around: whatever stands on the floor and is higher than a rug or a dog bed – sofas,
+ * tables, cabinets, beds. Lamps, rugs and what hangs on a wall stay out (a place on the sofa is still reached, with a
+ * hop at the end).
+ */
+function obstaclesOf(floor: Floor, base: (floor: Floor, f: Furniture) => number): Obstacle[] {
+  return floor.furniture
+    .filter((f) => f.h >= 0.25 && base(floor, f) < 0.3 && !/lamp|light|leuchte|rug|carpet|teppich|(^|_)mat($|_)|parking|stellplatz/.test(itemOf(f.type)))
+    .map((f) => {
+      const a = (f.rotation * Math.PI) / 180;
+      return { c: [f.x, f.z] as Vec2, u: [Math.cos(a), Math.sin(a)] as Vec2, hw: f.w / 2, hd: f.d / 2 };
+    });
+}
+
 function rugsOf(floor: Floor): Rug[] {
   return floor.furniture
     .filter((f) => /rug|carpet|teppich|(^|_)mat($|_)/.test(itemOf(f.type)) && f.h <= 0.06)
@@ -537,7 +556,7 @@ export function startPets(ctx: PetsContext): PetsController {
       // shut doors are walls for the pets
       const shut = ctx.closedDoors?.() ?? new Set<string>();
       const walkable = shut.size ? { ...floor, openings: floor.openings.filter((o) => !shut.has(o.id)) } : floor;
-      info = { floor, map: new ctx.FloorMap(plan, walkable), rooms: floor.rooms.filter((r) => r.points.length >= 3), spots: new Map(), rugs: rugsOf(floor) };
+      info = { floor, map: new ctx.FloorMap(plan, walkable, obstaclesOf(floor, ctx.base)), rooms: floor.rooms.filter((r) => r.points.length >= 3), spots: new Map(), rugs: rugsOf(floor) };
       floors.set(id, info);
     }
     return info;
@@ -780,12 +799,20 @@ export function startPets(ctx: PetsContext): PetsController {
 
   const tick = (now: number) => {
     raf = 0;
-    const dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+    // tablet level, nobody touched the view for a while: they hold still (nothing is drawn) until the next touch
+    if (viewer.resting) {
+      last = 0;
+      timer = setTimeout(() => (raf = requestAnimationFrame(tick)), 1000);
+      return;
+    }
+    // the tablet level draws them about 5 times a second: they step as often, so a step may be longer
+    const dt = last ? Math.min(viewer.low ? 0.3 : 0.1, (now - last) / 1000) : 0;
     last = now;
     let active = false;
     for (const a of animals) if (step(a, dt, now)) active = true;
-    if (active) viewer.invalidate();
-    if (active) raf = requestAnimationFrame(tick);
+    if (active) viewer.animate();
+    if (active && viewer.low) timer = setTimeout(() => (raf = requestAnimationFrame(tick)), 180);
+    else if (active) raf = requestAnimationFrame(tick);
     else {
       // all of them rest: wake up when the first one wants to go on
       const wait = Math.max(500, Math.min(...animals.map((a) => a.until - performance.now()), 60000));
@@ -834,7 +861,7 @@ export function startPets(ctx: PetsContext): PetsController {
       }
     }
     const swim = () => {
-      if (document.hidden) return;
+      if (document.hidden || viewer.resting) return;
       const t = performance.now() / 1000;
       for (const fi of fishes) {
         const s = Math.sin(t * fi.speed + fi.phase);
@@ -843,7 +870,7 @@ export function startPets(ctx: PetsContext): PetsController {
         // facing the way it swims
         fi.g.scale.x = Math.cos(t * fi.speed + fi.phase) >= 0 ? 1 : -1;
       }
-      viewer.invalidate();
+      viewer.animate();
     };
     if (fishes.length) {
       swim();

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { BufferGeometry } from "three";
 import type { Floor, Furniture, Opening, Room } from "../model.ts";
 import { newFloor } from "../model.ts";
-import { buildFloorGeometry, clipAlong, stairHoles } from "./build.ts";
+import { buildFloorGeometry, clipAlong, stairHoles, stairHoleParts } from "./build.ts";
 
 const EXT = 0.24;
 const INT = 0.12;
@@ -175,4 +175,73 @@ test("a stairwell opening cuts a hole into its own floor; stairs below reaching 
   const solid = area(buildFloorGeometry(upper, EXT, INT).floor);
   const cut = area(buildFloorGeometry(upper, EXT, INT, holes).floor);
   assert.ok(solid - cut > 4.4 && solid - cut < 4.6, `${solid - cut}`);
+});
+
+test("a stairwell joined with the stairs' own hole is cut even where the two reach past the room (#375)", () => {
+  // two rooms upstairs; the stairwell lies in the first, the tall stairs below reach a little into the second
+  const upper = floorWith([rect("a", 0, 0, 6, 4.5), rect("b", 0, 4.5, 6, 8)]);
+  upper.elevation = 2.75;
+  upper.furniture.push({ id: "w", type: "stairwell", x: 3, z: 3.65, rotation: 0, w: 2, d: 1, h: 0.005, variant: null });
+  const lower = floorWith([rect("c", 0, 0, 6, 8)]);
+  lower.furniture.push({ id: "s", type: "stairs", x: 3, z: 4.2, rotation: 0, w: 2, d: 1.95, h: 3.5, variant: null });
+  const solid = area(buildFloorGeometry(upper, EXT, INT).floor);
+  const cut = area(buildFloorGeometry(upper, EXT, INT, stairHoleParts([lower, upper], upper)).floor);
+  // the union of both openings: x 2–4, z 3.15–5.175 (2 × 2.025 m), minus the 3 mm inset
+  assert.ok(solid - cut > 3.9 && solid - cut < 4.06, `${solid - cut}`);
+});
+
+test("a sloping wall: its top runs from the height at its start to the one at its end (D569)", () => {
+  // edge 0 of the room runs from (0,0) to (4,0): 1.0 m high at the start, 2.5 m at the end
+  const room = { ...rect("r", 0, 0, 4, 3), wall_slopes: [[1.0, 2.5] as [number, number], null, null, null] };
+  const floor = { ...floorWith([room]), height: 2.5 };
+  const pos = buildFloorGeometry(floor, EXT, INT).walls.getAttribute("position");
+  // the highest point of the wall's solid near each end of the edge (z < 0.05: the wall on edge 0)
+  const top = (x0: number, x1: number) => {
+    let hi = -Infinity;
+    for (let i = 0; i < pos.count; i++) if (pos.getZ(i) < 0.05 && pos.getZ(i) > -0.5 && pos.getX(i) >= x0 && pos.getX(i) <= x1) hi = Math.max(hi, pos.getY(i));
+    return hi;
+  };
+  assert.ok(top(0.05, 0.4) < 1.2, `start ${top(0.05, 0.4)}`);
+  assert.ok(top(3.6, 3.95) > 2.2, `end ${top(3.6, 3.95)}`);
+  // a window near the low end stays below the top
+  const win = { ...opening("window", "r", 0, 0.8, 0.6), sill: 0.3, height: 1.5 };
+  const geo = buildFloorGeometry({ ...floor, openings: [win] }, EXT, INT);
+  // centred 0.8 m along the wall it starts at 0.5 m, where the top is 1.0 + 1.5 × 0.5 / 4 ≈ 1.19 m: it ends just below
+  const info = geo.openings.find((o) => o.opening.id === win.id);
+  assert.ok(info && info.top < 1.19 && info.top > 1.1, `window top ${info?.top}`);
+});
+
+test("where a tall wall meets a lower one, its top edge runs across the joint and comes down to the lower top (#417)", () => {
+  // two rooms in a row, the right one with low walls (1.2 m) on its three free sides
+  const low = { ...rect("b", 4, 0, 7, 3), wall_heights: [1.2, 1.2, 1.2, null] };
+  const geo = buildFloorGeometry(floorWith([rect("a", 0, 0, 4, 3), low]), EXT, INT);
+  const segs = segments(geo.lines);
+  const H = newFloor("f", "Floor", 0).height;
+  // the tall wall's free end above the outer joint at x = 4: a top edge across the wall thickness …
+  const across = segs.filter((s) => atY(s, H) && Math.abs(s[0] - 4) < 1e-6 && Math.abs(s[3] - 4) < 1e-6 && Math.abs(Math.min(s[2], s[5]) + EXT) < 1e-6);
+  assert.ok(across.length >= 1, "top edge across the joint");
+  // … and a vertical edge from the low wall's top up to the tall wall's top on the outer face
+  const step = segs.filter((s) => vertical(s) && Math.abs(s[0] - 4) < 1e-6 && Math.abs(s[2] + EXT) < 1e-6 && Math.min(s[1], s[4]) > 0.5);
+  near(Math.max(...step.map((s) => Math.max(s[1], s[4]))), H);
+  near(Math.min(...step.map((s) => Math.min(s[1], s[4]))), 1.2);
+  // equal heights keep no extra lines at a joint
+  const flat = segments(buildFloorGeometry(floorWith([rect("a", 0, 0, 4, 3), rect("b", 4, 0, 7, 3)]), EXT, INT).lines);
+  assert.equal(flat.filter((s) => vertical(s) && Math.abs(s[0] - 4) < 1e-6 && Math.abs(s[2] + EXT) < 1e-6).length, 0);
+});
+
+test("a window across a transition without a wall cuts both outer walls, framed only at its own ends (#624)", () => {
+  const cutLength = (g: BufferGeometry) => segments(g).filter((s) => atY(s, 1.15) && s[6] >= 16 && !vertical(s)).reduce((sum, s) => sum + length(s), 0);
+  const a = rect("a", 0, 0, 4, 3);
+  const b = { ...rect("b", 4, 0, 7, 3), wall_heights: [null, null, null, 0] };
+  const plain = buildFloorGeometry(floorWith([a, b]), EXT, INT);
+  // 1.2 m wide, centred 0.2 m before the transition at x = 4: 0.4 m of it lies in b's wall
+  const win = buildFloorGeometry(floorWith([a, b], [opening("window", "a", 0, 3.8, 1.2)]), EXT, INT);
+  near(cutLength(plain.lines) - cutLength(win.lines), 2 * 1.2 - 2 * EXT, 1e-6);
+  // no jamb lines at the transition
+  const segs = segments(win.lines);
+  assert.ok(!segs.some((s) => vertical(s) && Math.abs(s[0] - 4) < 1e-6 && s[1] > 0.5 && s[4] > 0.5));
+  // its far jambs stand in b's wall, 0.4 m past the transition
+  const jambs = segs.filter((s) => vertical(s) && s[1] > 0.8 && s[4] > 0.8 && s[0] > 2 && s[0] < 6);
+  near(Math.max(...jambs.map((s) => s[0])), 4.4, 1e-5);
+  near(Math.min(...jambs.map((s) => s[0])), 3.2, 1e-5);
 });

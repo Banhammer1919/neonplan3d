@@ -1,6 +1,6 @@
 // Warnings shown in 3D: smoke, gas, carbon monoxide and water sensors of a room, a triggered alarm,
-// a window open while it rains, a power outage and (Pool Pro) a pool's pH or chlorine far off or frost in the
-// water, (Haushalt Pro) a fridge door standing open too long. The rooms concerned pulse in the warning's colour.
+// a window open while it rains, a power outage and (Haushalt Pro) a fridge door standing open too long; modules
+// add their own (a pool's pH far off). The rooms concerned pulse in the warning's colour.
 
 import { areaEntities, entityName, openingState, type OpeningEntities } from "./devices.ts";
 import { translate } from "./i18n.ts";
@@ -8,21 +8,26 @@ import type { Building } from "./model.ts";
 import type { HomeAssistant } from "./types.ts";
 import { stationRain, weatherEntity } from "./weather.ts";
 import { hasFeature } from "./features.ts";
-import { poolAreas, poolEntities, poolLinksWithDevices, poolState } from "./pool.ts";
 import { isOutage } from "./outage.ts";
 import { doorsOf, fridgeOpenTooLong } from "./household.ts";
 import { pointInPolygon } from "./model.ts";
 
 export { isOutage };
 
-export type AlertKind = "smoke" | "gas" | "co" | "water" | "alarm" | "alarm_pending" | "window_rain" | "power_outage" | "pool_ph" | "pool_chlorine" | "pool_frost" | "fridge_door";
+export type AlertKind = "smoke" | "gas" | "co" | "water" | "alarm" | "alarm_pending" | "window_rain" | "power_outage" | "fridge_door";
 
 export interface Alert {
-  kind: AlertKind;
+  /** One of the house's own kinds, or a module's ("pool_ph"). */
+  kind: AlertKind | string;
   entity: string;
   /** Room and floor concerned; null for the whole house (an alarm). */
   roomId: string | null;
   floorId: string | null;
+  /** A module's warning: its text and colour come with it. */
+  text?: string;
+  color?: [number, number, number];
+  /** Shows at the top only, no room pulses (a pool's warning: the pool is outside). */
+  quiet?: boolean;
 }
 
 /** Entities the warnings come from; found once per registry. */
@@ -34,8 +39,6 @@ export interface AlertSources {
   outage: string | null;
   /** A weather station's rain sensor or rain rate, used instead of the weather entity (D407). */
   rain?: string | null;
-  /** Pool Pro: the pools whose water values are watched. */
-  pools: { floorId: string; areaId: string; ids: string[] }[];
   /** Haushalt Pro: the fridges with door sensors (their doors may not stand open too long). */
   fridges?: { floorId: string; roomId: string | null; furnitureId: string; ids: string[] }[];
 }
@@ -56,9 +59,6 @@ export function alertSources(hass: HomeAssistant, building: Building, weatherId?
   const ids = Object.keys(hass.states);
   const weather = building.settings.rain_warning === false ? null : weatherEntity(hass, weatherId ?? building.settings.weather_entity);
   const outage = building.settings.outage_entity && hass.states[building.settings.outage_entity] ? building.settings.outage_entity : null;
-  const pools = hasFeature("pool")
-    ? poolAreas(building.floors).map(({ floor, area }) => ({ floorId: floor.id, areaId: area.id, ids: Object.values(poolEntities(hass, area.pool)).filter((x): x is string => !!x) }))
-    : [];
   const fridges = hasFeature("household")
     ? building.floors.flatMap((floor) =>
         floor.furniture
@@ -68,12 +68,12 @@ export function alertSources(hass: HomeAssistant, building: Building, weatherId?
     : [];
   const rainId = building.settings.rain_warning === false ? null : building.settings.rain_entity;
   const rain = rainId && hass.states[rainId] ? rainId : null;
-  return { rooms, alarms: ids.filter((id) => id.startsWith("alarm_control_panel.")), weather, outage, pools, rain, fridges };
+  return { rooms, alarms: ids.filter((id) => id.startsWith("alarm_control_panel.")), weather, outage, rain, fridges };
 }
 
 /** Entities whose state changes may raise or clear a warning. */
 export function alertEntities(sources: AlertSources): string[] {
-  return [...sources.rooms.flatMap((r) => r.sensors), ...sources.alarms, ...(sources.weather ? [sources.weather] : []), ...(sources.outage ? [sources.outage] : []), ...(sources.rain ? [sources.rain] : []), ...(sources.pools ?? []).flatMap((p) => p.ids), ...(sources.fridges ?? []).flatMap((f) => f.ids)];
+  return [...sources.rooms.flatMap((r) => r.sensors), ...sources.alarms, ...(sources.weather ? [sources.weather] : []), ...(sources.outage ? [sources.outage] : []), ...(sources.rain ? [sources.rain] : []), ...(sources.fridges ?? []).flatMap((f) => f.ids)];
 }
 
 /** The active warnings, rooms first, then the house-wide alarm. */
@@ -102,16 +102,6 @@ export function findAlerts(hass: HomeAssistant, building: Building, sources: Ale
     }
   }
   if (sources.outage && isOutage(hass.states[sources.outage])) out.push({ kind: "power_outage", entity: sources.outage, roomId: null, floorId: null });
-  // Pool Pro: only values far off the range warn (a little off shows on the pool's card), frost while the pump rests
-  for (const p of sources.pools ?? []) {
-    const area = building.floors.find((f) => f.id === p.floorId)?.outdoor?.find((a) => a.id === p.areaId);
-    if (!area) continue;
-    const s = poolState(hass, poolLinksWithDevices(area.pool, building.floors));
-    if (s.ph?.range === "bad" && s.entities.ph) out.push({ kind: "pool_ph", entity: s.entities.ph, roomId: null, floorId: p.floorId });
-    if (s.chlorine?.range === "bad" && s.entities.chlorine) out.push({ kind: "pool_chlorine", entity: s.entities.chlorine, roomId: null, floorId: p.floorId });
-    const celsius = s.temp === null ? null : s.unit.includes("F") ? ((s.temp - 32) * 5) / 9 : s.temp;
-    if (celsius !== null && celsius <= 3 && !s.pump?.on) out.push({ kind: "pool_frost", entity: s.entities.temperature ?? s.entities.heater ?? p.areaId, roomId: null, floorId: p.floorId });
-  }
   // Haushalt Pro: a fridge door open longer than its limit
   for (const fr of sources.fridges ?? []) {
     const f = building.floors.find((x) => x.id === fr.floorId)?.furniture.find((m) => m.id === fr.furnitureId);
@@ -126,9 +116,10 @@ export function findAlerts(hass: HomeAssistant, building: Building, sources: Ale
   return out;
 }
 
-/** Colour a room pulses in (0..1 channels). */
-export function alertColor(kind: AlertKind): [number, number, number] {
-  switch (kind) {
+/** Colour a room pulses in (0..1 channels); a module's warning brings its own. */
+export function alertColor(a: Pick<Alert, "kind" | "color">): [number, number, number] {
+  if (a.color) return a.color;
+  switch (a.kind) {
     case "water":
       return [0.2, 0.6, 1];
     case "window_rain":
@@ -137,11 +128,6 @@ export function alertColor(kind: AlertKind): [number, number, number] {
       return [1, 0.62, 0.2];
     case "power_outage":
       return [1, 0.78, 0.2];
-    case "pool_ph":
-    case "pool_chlorine":
-      return [1, 0.62, 0.2];
-    case "pool_frost":
-      return [0.55, 0.8, 1];
     case "fridge_door":
       return [0.45, 0.85, 1];
     default:
@@ -152,9 +138,9 @@ export function alertColor(kind: AlertKind): [number, number, number] {
 /** Short text for the banner: "Küche · Rauch: Rauchmelder". */
 export function alertText(hass: HomeAssistant | undefined, building: Building, a: Alert): string {
   const room = a.roomId ? building.floors.flatMap((f) => f.rooms).find((r) => r.id === a.roomId) : null;
-  const st = hass?.states[a.entity];
-  // a pool warning names the value ("pH 8.1"), the others the device
-  const name = a.kind.startsWith("pool_") && st ? `${st.state}${st.attributes.unit_of_measurement ? ` ${st.attributes.unit_of_measurement}` : ""}` : hass ? entityName(hass, a.entity) : a.entity;
+  // a module's warning brings its text
+  if (a.text !== undefined) return room ? `${room.name} · ${a.text}` : a.text;
+  const name = hass ? entityName(hass, a.entity) : a.entity;
   const text = translate(hass, `alert_${a.kind}` as Parameters<typeof translate>[1], { name });
   if (!room) return text;
   // without the device name: "Gäste-WC · Fenster offen bei Regen" (the room already says where, #374)

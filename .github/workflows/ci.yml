@@ -39,6 +39,21 @@ jobs:
       - run: mypy custom_components/neonplan3d
       - run: pytest -q
 
+  # The job above gets the newest test harness that still runs on Python 3.13 (an older Home Assistant). Current
+  # Home Assistant needs Python 3.14 and checks schemas with Probatio: the tests run there too (pointed out by
+  # hohoanganh). It only warns for now – a red run here means: look before the next release.
+  python-current-ha:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pip install -r requirements_test.txt
+      - run: python -c "from homeassistant.const import __version__; print('Home Assistant', __version__)"
+      - run: pytest -q
+
   hassfest:
     runs-on: ubuntu-latest
     steps:

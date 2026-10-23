@@ -166,6 +166,7 @@ async def async_fetch_catalog(hass: HomeAssistant, key: str, instance: str) -> d
         "offers": _offers(data.get("offers")),
         "loyalty": _loyalty(data.get("loyalty")),
         "supporter": _supporter(data.get("supporter")),
+        "newsletter": _newsletter(data.get("newsletter")),
     }
 
 
@@ -212,6 +213,14 @@ def _loyalty(raw: Any) -> dict[str, Any] | None:
     return {"code": code, "percent": percent}
 
 
+def _newsletter(raw: Any) -> dict[str, Any] | None:
+    """The shop's invitation to its newsletter (with the taster packs as a thank-you): only for customers who have
+    not signed up yet; the link leads to the sign-up with double opt-in."""
+    if not isinstance(raw, dict) or not _https(raw.get("url")):
+        return None
+    return {"url": _https(raw.get("url"))}
+
+
 def _supporter(raw: Any) -> dict[str, Any] | None:
     """A Supporter-Pass holder's Discord code: typed into /supporter on Discord, it unlocks the supporter
     role and the beta channels there."""
@@ -246,6 +255,7 @@ def status(data: FloorplanData, instance: str) -> dict[str, Any]:
         "offers": lic.get("offers", []) if key else [],
         "loyalty": lic.get("loyalty") if key else None,
         "supporter": lic.get("supporter") if key else None,
+        "newsletter": lic.get("newsletter") if key else None,
         "updates": lic.get("updates", []),
     }
 
@@ -262,6 +272,7 @@ async def async_activate(hass: HomeAssistant, data: FloorplanData, key: str) -> 
         "offers": catalog["offers"],
         "loyalty": catalog["loyalty"],
         "supporter": catalog["supporter"],
+        "newsletter": catalog["newsletter"],
         "checked_at": time.time(),
         "error": None,
     }
@@ -278,6 +289,7 @@ async def async_remove(hass: HomeAssistant, data: FloorplanData) -> dict[str, An
         "offers": [],
         "loyalty": None,
         "supporter": None,
+        "newsletter": None,
         "checked_at": None,
         "error": None,
     }
@@ -297,9 +309,10 @@ async def async_install(hass: HomeAssistant, data: FloorplanData, pack_id: str) 
     except PackError as err:
         raise LicenseError(err.code, err.detail) from err
     before = next((p for p in data.packs if p["id"] == payload["id"]), None)
-    await data.async_add_pack(payload, parts_of(text))
+    waits = await data.async_add_pack(payload, parts_of(text))
     # installed: its "ready" notice goes
     persistent_notification.async_dismiss(hass, _notice_id(payload["id"]))
+    persistent_notification.async_dismiss(hass, GROUP_NOTICE)
     if before and int(payload.get("release") or 1) > int(before.get("release") or 1):
         # an update: remember what it brought, the extensions page shows it once
         old = {i.get("id") for i in before.get("items", [])}
@@ -323,6 +336,8 @@ async def async_install(hass: HomeAssistant, data: FloorplanData, pack_id: str) 
         "licensee": payload["licensee"],
         "release": payload["release"],
         "items": len(payload["items"]),
+        # module code runs only after an admin approved it (see storage.async_add_pack)
+        "approval": waits,
     }
 
 
@@ -346,12 +361,17 @@ async def async_refresh(hass: HomeAssistant, data: FloorplanData, install_update
             "offers": catalog["offers"],
             "loyalty": catalog["loyalty"],
             "supporter": catalog["supporter"],
+            "newsletter": catalog["newsletter"],
             "checked_at": time.time(),
             "error": None,
         }
     )
     if install_updates:
-        installed = {p["id"]: int(p.get("release") or 1) for p in data.packs}
+        # a module update that waits for the admin's approval counts as fetched
+        installed = {
+            p["id"]: max(int(p.get("release") or 1), int((p.get("pending") or {}).get("release") or 1))
+            for p in data.packs
+        }
         fetched = 0
         for p in catalog["packs"]:
             if p["id"] in installed and p["release"] > installed[p["id"]]:
@@ -368,35 +388,50 @@ async def async_refresh(hass: HomeAssistant, data: FloorplanData, install_update
     return status(data, instance)
 
 
+# several packs that turned up at once share one notice
+GROUP_NOTICE = f"{DOMAIN}_packs_new"
+
+
 def _notice_id(pack_id: str) -> str:
     return f"{DOMAIN}_pack_{pack_id}"
 
 
 def _announce_new_packs(hass: HomeAssistant, data: FloorplanData, catalog: list[dict[str, Any]]) -> None:
-    """A pack that newly belongs to the customer (bought, or given like a fun pack) and is not installed here:
-    one notice in Home Assistant's notifications, gone once installed. Never on the first catalog of a key (the
-    customer is on the extensions page then), never for shop offers they do not own."""
+    """Packs that newly belong to the customer (bought, or given like a fun pack) and are not installed here: one
+    notice in Home Assistant's notifications (a single one for several at once: four taster packs are one gift, not
+    four messages), gone once a pack is installed. Never on the first catalog of a key (the customer is on the
+    extensions page then), never for shop offers they do not own."""
     before = {p.get("id") for p in data.license.get("catalog") or []}
     if not before:
         return
     installed = {p["id"] for p in data.packs}
+    fresh = [p for p in catalog if p["id"] not in before and p["id"] not in installed]
+    if not fresh:
+        return
     german = (hass.config.language or "").startswith("de")
-    for p in catalog:
-        if p["id"] in before or p["id"] in installed:
-            continue
-        name = p.get("name") or p["id"]
-        if german:
-            title = "NeonPlan 3D: neues Pack bereit"
-            message = (
-                f"**{name}** gehört jetzt dir. Installieren mit einem Klick: "
-                f"[NeonPlan 3D](/{PANEL_URL_PATH}) → Erweiterungen."
-            )
-        else:
-            title = "NeonPlan 3D: a new pack is ready"
-            message = (
-                f"**{name}** is yours now. Install it with one click: [NeonPlan 3D](/{PANEL_URL_PATH}) → Extensions."
-            )
-        persistent_notification.async_create(hass, message, title=title, notification_id=_notice_id(p["id"]))
+    names = ", ".join(f"**{p.get('name') or p['id']}**" for p in fresh)
+    link = f"[NeonPlan 3D](/{PANEL_URL_PATH})"
+    if len(fresh) == 1:
+        title = "NeonPlan 3D: neues Pack bereit" if german else "NeonPlan 3D: a new pack is ready"
+        message = (
+            f"{names} gehört jetzt dir. Installieren mit einem Klick: {link} → Erweiterungen."
+            if german
+            else f"{names} is yours now. Install it with one click: {link} → Extensions."
+        )
+        notice = _notice_id(fresh[0]["id"])
+    else:
+        title = (
+            f"NeonPlan 3D: {len(fresh)} neue Packs bereit"
+            if german
+            else f"NeonPlan 3D: {len(fresh)} new packs are ready"
+        )
+        message = (
+            f"{names} gehören jetzt dir. Installieren mit einem Klick: {link} → Erweiterungen."
+            if german
+            else f"{names} are yours now. Install them with one click: {link} → Extensions."
+        )
+        notice = GROUP_NOTICE
+    persistent_notification.async_create(hass, message, title=title, notification_id=notice)
 
 
 async def async_refresh_quietly(hass: HomeAssistant, data: FloorplanData) -> None:

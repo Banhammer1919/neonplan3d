@@ -3,6 +3,9 @@
 import type { StartView } from "./model.ts";
 import type { Quality, WallMode } from "./viewer/viewer3d.ts";
 
+/** Where the clock sits: a corner, or none. */
+export type ClockPos = "off" | "tl" | "tr" | "bl" | "br";
+
 export interface CardConfig {
   type: string;
   floor?: string;
@@ -16,17 +19,23 @@ export interface CardConfig {
   controls_side?: "left" | "right";
   /** Switching floors keeps the camera (#191). */
   keep_view?: boolean;
+  /** 3D lock: the angle stays fixed, a drag moves the view (a wall tablet with children around). */
+  angle_lock?: boolean;
   /** Pull floors apart in the house view (default true). */
   explode?: boolean;
   /** A "Cameras" button that opens the camera wall, every camera's live picture (Pro: camera cockpit). */
   camera_wall?: boolean;
   /** The roof lifts and fades while zooming in (default true); false keeps it on the house. */
   roof_fade?: boolean;
+  /** Show the roof (default true); false leaves it out altogether, as if the house had none (D601). */
+  roof?: boolean;
   quality?: Quality;
   /** Show the performance display (frames per second, draw calls). */
   stats?: boolean;
   /** HTML markers: none | important (default) | all. */
-  markers?: "none" | "important" | "all";
+  markers?: "none" | "important" | "all" | "room";
+  /** How large the device symbols are (default normal). */
+  marker_size?: "small" | "normal" | "large";
   /** Every device with an own name shows it under its marker (#156). */
   marker_names?: boolean;
   /** The star with the central menu: all lights / blinds of the floor or house and the favourites (default true, #145). */
@@ -42,7 +51,10 @@ export interface CardConfig {
   /** Heatmap of the rooms: none | temperature | humidity | co2. */
   heatmap?: "none" | "temperature" | "humidity" | "co2";
   /** Look: neon | blueprint | day. */
-  theme?: "neon" | "blueprint" | "day";
+  /** The look; "auto" shows Day while the sun is up and Neon at night. */
+  theme?: "neon" | "blueprint" | "day" | "auto";
+  /** Date and time in a corner of the view (default off). */
+  clock?: ClockPos;
   /** Accent colour for the neon look and the card's chips ("#rrggbb"); leave out for the stock cyan. */
   accent?: string;
   /** Energy values at the top (default true). */
@@ -78,6 +90,12 @@ export interface CardConfig {
   alerts?: boolean;
   /** Jump to the room of a new warning (default false). */
   alert_jump?: boolean;
+  /** Kamera-Cockpit: the live director – the card shows by itself what happens (events chosen in the settings; default off). */
+  director?: boolean;
+  /** Voice control: a microphone button – "Show the living room" shows it, other sentences go to Assist (default off). */
+  voice?: boolean;
+  /** This card's screen name for Assist and the service `neonplan3d.ask`: a sentence that names a screen is only for it. */
+  screen?: string;
   /** Scene and script chips of the selected room (default true). */
   scenes?: boolean;
   /** Motion trail: where motion was reported in the last half hour, with times (default off). */

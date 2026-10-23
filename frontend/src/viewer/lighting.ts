@@ -10,7 +10,8 @@ import { outdoorSurface } from "./outdoor.ts";
 import { groundDrop, outdoorStanding, pointInPolygon } from "../model.ts";
 import type { Wall } from "../geometry/walls.ts";
 import type { OpeningInfo } from "./build.ts";
-import { LOWER_OFFSET } from "./geo.ts";
+import { LOWER_OFFSET, triangulate } from "./geo.ts";
+import { clipConvex } from "../geometry/area.ts";
 
 /** How a lamp spreads its light. */
 export type LightKind = "omni" | "ceiling" | "spot" | "pendant" | "up" | "wall";
@@ -85,7 +86,8 @@ export function buildLightSurface(
     }
   };
 
-  // floors: cells whose centre lies in the room
+  // floors: the grid's cells, cut to the room – a cell the room's edge runs through keeps only its part inside, so the
+  // light reaches every wall (no dark strip where a wall is off the grid) and never spills past it (#300)
   floor.rooms.forEach((r, ri) => {
     if (r.points.length < 3) return;
     const xs = r.points.map((p) => p[0]);
@@ -98,18 +100,35 @@ export function buildLightSurface(
     const nz = Math.max(1, Math.ceil((z1 - z0) / cell));
     for (let i = 0; i < nx; i++) {
       for (let j = 0; j < nz; j++) {
-        const cx = x0 + (i + 0.5) * cell;
-        const cz = z0 + (j + 0.5) * cell;
-        if (!pointInPolygon([cx, cz], r.points)) continue;
-        // no light over a floor opening: one looks through it
-        if (holes.some((h) => pointInPolygon([cx, cz], h))) continue;
         const a = x0 + i * cell;
         const b = z0 + j * cell;
-        // the last row and column end at the room's edge: past it they would light a strip of the
-        // neighbouring room behind the wall (#300) and lie twice in a passage (#290)
+        // the last row and column end at the room's bounds (a cell never lies twice in a passage, #290)
         const a1 = Math.min(a + cell, x1);
         const b1 = Math.min(b + cell, z1);
-        quad([a, LIFT, b], [a, LIFT, b1], [a1, LIFT, b1], [a1, LIFT, b], [0, 1, 0], ri, -1);
+        const part = clipConvex(r.points, [
+          [a, b],
+          [a1, b],
+          [a1, b1],
+          [a, b1],
+        ]);
+        const area = part.length >= 3 ? Math.abs(shoelace(part)) : 0;
+        if (area < 1e-4) continue;
+        // no light over a floor opening: one looks through it
+        const mid = centroid(part);
+        if (holes.some((h) => pointInPolygon(mid, h))) continue;
+        if (area > (a1 - a) * (b1 - b) - 1e-6) {
+          quad([a, LIFT, b], [a, LIFT, b1], [a1, LIFT, b1], [a1, LIFT, b], [0, 1, 0], ri, -1);
+          continue;
+        }
+        // a cut cell: its triangles, each drawn as a quad with a repeated corner (the surface is read in quads)
+        for (const [i0, i1, i2] of triangulate(part)) {
+          let p0 = part[i0];
+          let p2 = part[i2];
+          const p1 = part[i1];
+          // facing up like the whole cells
+          if ((p1[1] - p0[1]) * (p2[0] - p0[0]) - (p1[0] - p0[0]) * (p2[1] - p0[1]) < 0) [p0, p2] = [p2, p0];
+          quad([p0[0], LIFT, p0[1]], [p1[0], LIFT, p1[1]], [p2[0], LIFT, p2[1]], [p2[0], LIFT, p2[1]], [0, 1, 0], ri, -1);
+        }
       }
     }
   });
@@ -401,4 +420,23 @@ export function roomIndexAt(floor: Floor, x: number, z: number): number {
  */
 export function zoneOf(zones: number[] | null, room: number): number {
   return zones && room >= 0 && room < zones.length ? zones[room] : room;
+}
+
+function shoelace(p: readonly Vec2[]): number {
+  let a = 0;
+  for (let i = 0; i < p.length; i++) {
+    const q = p[(i + 1) % p.length];
+    a += p[i][0] * q[1] - q[0] * p[i][1];
+  }
+  return a / 2;
+}
+
+function centroid(p: readonly Vec2[]): Vec2 {
+  let x = 0;
+  let z = 0;
+  for (const [px, pz] of p) {
+    x += px;
+    z += pz;
+  }
+  return [x / p.length, z / p.length];
 }

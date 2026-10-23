@@ -204,3 +204,16 @@ test("doors on one wall line between several rooms lead into the room they sit i
   assert.deepEqual(rooms("bad"), [0, 1]);
   assert.deepEqual(rooms("schlaf"), [0, 2]);
 });
+
+test("the floor's light cells cover an L-shaped room off the grid exactly – no dark strip, nothing past its walls", () => {
+  // the inner corner (2.1, 1.7) lies between grid lines of 0.25 m
+  const l: Room = { id: "l", name: "l", area_id: null, points: [[0, 0], [4, 0], [4, 1.7], [2.1, 1.7], [2.1, 3], [0, 3]], floor_material: "wood" };
+  const s = surfaceOf({ ...newFloor("f", "Floor", 0), rooms: [l] });
+  let area = 0;
+  for (let v = 0; v < s.room.length; v += 3) {
+    if (s.normal[v * 3 + 1] !== 1) continue;
+    const [ax, az, bx, bz, cx, cz] = [s.pos[v * 3], s.pos[v * 3 + 2], s.pos[v * 3 + 3], s.pos[v * 3 + 5], s.pos[v * 3 + 6], s.pos[v * 3 + 8]];
+    area += Math.abs((bx - ax) * (cz - az) - (cx - ax) * (bz - az)) / 2;
+  }
+  assert.ok(Math.abs(area - (4 * 1.7 + 2.1 * 1.3)) < 1e-6, `${area}`);
+});

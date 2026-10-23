@@ -1,6 +1,6 @@
 # NeonPlan 3D – notes for Claude
 
-- Spec and phase plan: `docs/plan.md` (German). Talk to the user in German; code, identifiers and comments in English.
+- Spec and phase plan: `private/docs/plan.md` (German, not public). Unreleased docs (Pool Pro) live in `private/docs/pending/`. Talk to the user in German; code, identifiers and comments in English.
 - Domain `neonplan3d`, repo `mastershort/neonplan3d`, minimum Home Assistant 2025.1.
 - Frontend lives in `frontend/` (Lit 3 + TypeScript, no decorators; three.js in a separate lazily loaded bundle).
   Bundles are committed to `custom_components/neonplan3d/frontend/`, and CI fails when they are stale, so run `npm run build` before committing.

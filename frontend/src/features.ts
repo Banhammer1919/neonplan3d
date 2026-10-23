@@ -22,11 +22,27 @@ export type Gated = Feature | FreeFeature;
  * unlocked (the tester has the pack) or the lab switch is on (localStorage "neonplan3d.lab" = "1").
  * A release takes a feature off this list.
  */
-export const UNRELEASED: readonly Gated[] = ["pool", "diagnostics"];
+export const UNRELEASED: readonly Gated[] = ["diagnostics", "pool"];
 
 export function labOn(): boolean {
   try {
+    // "?fp3d_lab=1" in the address bar switches it on (and "=0" off) – easier than the browser console on a tablet
+    const flag = new URLSearchParams(location.search).get("fp3d_lab");
+    if (flag === "1") localStorage.setItem("neonplan3d.lab", "1");
+    else if (flag === "0") localStorage.removeItem("neonplan3d.lab");
     return localStorage.getItem("neonplan3d.lab") === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** The parked camera projection prototype: only with its own switch ("?fp3d_projection=1", "=0" off), off by default. */
+export function projectionOn(): boolean {
+  try {
+    const flag = new URLSearchParams(location.search).get("fp3d_projection");
+    if (flag === "1") localStorage.setItem("neonplan3d.projection", "1");
+    else if (flag === "0") localStorage.removeItem("neonplan3d.projection");
+    return localStorage.getItem("neonplan3d.projection") === "1";
   } catch {
     return false;
   }
@@ -73,7 +89,7 @@ const MANUAL_FEATURE: Record<string, { de: string; en: string }> = {
   auto_pro: { de: "pro-erweiterungen/#66-auto-pro", en: "pro-add-ons/#66-auto-pro" },
   time_travel: { de: "pro-erweiterungen/#67-zeitreise", en: "pro-add-ons/#67-time-travel" },
   pool: { de: "pro-erweiterungen/#68-pool-pro", en: "pro-add-ons/#68-pool-pro" },
-  household: { de: "pro-erweiterungen/#68-haushalt-pro-beta", en: "pro-add-ons/#68-household-pro-beta" },
+  household: { de: "pro-erweiterungen/#68-haushalt-pro", en: "pro-add-ons/#68-household-pro" },
   extensions: { de: "erweiterungen-shop-moebel-packs/", en: "extensions-shop-furniture-packs/" },
 };
 

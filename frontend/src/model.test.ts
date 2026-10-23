@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { emptyBuilding, floorElevation, newFloor, openingPreset, openingStyle, normalizeBuilding, outdoorDrop, outdoorGround, resizeFurniture, roomTiles, sidelightLayout, spotGrid, surfaceHeight, type Furniture } from "./model.ts";
+import { emptyBuilding, lockAlong, gangEntities, gangPlateWidth, gangsOf, floorElevation, newFloor, outdoorZones, zonesOf, openingPreset, openingStyle, normalizeBuilding, outdoorDrop, outdoorGround, resizeFurniture, roomTiles, sidelightLayout, spotGrid, surfaceHeight, type Furniture } from "./model.ts";
 
 test("a sidelight sits opposite the hinge, on the hinge side when asked, and keeps the leaf at least half a metre", () => {
   const none = {};
@@ -173,4 +173,52 @@ test("a patch cut out of a lawn decides the ground inside it", () => {
 test("a glass wall is a preset of its own (#163)", () => {
   assert.equal(openingPreset({ type: "window", leaves: 1, sill: 0, style: "glass_wall" }), "glass_wall");
   assert.equal(openingPreset({ type: "window", leaves: 1, sill: 0, style: null }), "terrace");
+});
+
+test("outdoor areas with a Home Assistant area act as rooms; hedges, fences and areas without one do not (#100)", () => {
+  const sq = (x: number): [number, number][] => [[x, 0], [x + 2, 0], [x + 2, 2], [x, 2]];
+  const floor = {
+    ...newFloor("f", "EG", 0),
+    rooms: [{ id: "r", name: "Küche", area_id: "kitchen", points: sq(0), floor_material: "wood" }],
+    outdoor: [
+      { id: "g", type: "lawn" as const, points: sq(5), area_id: "garden", name: "Garten" },
+      { id: "t", type: "terrace" as const, points: sq(10) },
+      { id: "h", type: "hedge" as const, points: sq(15), area_id: "garden" },
+    ],
+  };
+  const zones = outdoorZones(floor);
+  assert.deepEqual(zones.map((z) => [z.id, z.name, z.area_id, z.outdoor]), [["g", "Garten", "garden", true]]);
+  assert.deepEqual(zonesOf(floor).map((z) => z.id), ["r", "g"]);
+});
+
+test("a wall switch or socket has one to four gangs; the same entity on two sockets counts once (#593)", () => {
+  assert.deepEqual(gangsOf({ gangs: null }), [{ entity: null }]);
+  assert.equal(gangsOf({ gangs: Array.from({ length: 6 }, () => ({ entity: null })) }).length, 4);
+  assert.equal(gangPlateWidth(1), 0.085);
+  assert.equal(gangPlateWidth(3), 0.227);
+  assert.equal(gangPlateWidth(9), gangPlateWidth(4));
+  assert.deepEqual(gangEntities({ gangs: [{ entity: "switch.relais" }, { entity: "switch.relais" }, { entity: "none" }, { entity: "light.flur" }] }), ["switch.relais", "light.flur"]);
+});
+
+test("a lamp fits under a high worktop step and stands on the floor; on a kitchen worktop it stands on top (#614)", () => {
+  const floor = newFloor("f", "F", 0);
+  const top = (h: number): Furniture => ({ id: `w${h}`, type: "worktop", x: 1, z: 1, rotation: 0, w: 1, d: 0.6, h, variant: null });
+  floor.furniture = [top(1.6)];
+  assert.equal(surfaceHeight(floor, 1, 1, 0.45), 0);
+  assert.equal(surfaceHeight(floor, 1, 1, 1.8), 1.6);
+  assert.equal(surfaceHeight(floor, 1, 1), 1.6);
+  floor.furniture = [top(0.92)];
+  assert.equal(surfaceHeight(floor, 1, 1, 0.45), 0.92);
+});
+
+test("a lock sits on the main leaf of a double door, not on the seam (#645)", () => {
+  const terrace = { type: "window" as const, style: null, width: 2, leaves: 2 as const };
+  assert.equal(lockAlong(terrace, true), 0.5);
+  assert.equal(lockAlong(terrace, false), 1.5);
+  const single = { type: "door" as const, style: null, width: 0.9, leaves: 1 as const };
+  assert.equal(lockAlong(single, true), 0.45);
+  // a sidelight opposite the hinge: the lock stays on the leaf
+  const lit = { type: "door" as const, style: "sidelight" as const, width: 1.6, leaves: 1 as const };
+  const l = sidelightLayout(1.6, "sidelight", true, {})!;
+  assert.ok(Math.abs(lockAlong(lit, true) - (l.x0 + l.x1) / 2) < 1e-9);
 });

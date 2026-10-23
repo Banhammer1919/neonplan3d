@@ -50,7 +50,13 @@ dessen öffentlicher Schlüssel zusätzlich in `PACK_PUBLIC_KEYS` eingetragen un
 ```
 
 - `size`: Standardgröße in Metern (Breite, Tiefe, Höhe). Im Plan lässt sich jedes Möbel danach frei
-  skalieren; alle Teile wachsen mit.
+  skalieren; alle Teile wachsen mit – außer denen mit `fix`.
+- `fix` an einem Teil (ab NeonPlan 1.23, Mindestversion setzen): welche Maße das Teil beim Skalieren
+  **behält** – `"w"`, `"d"`, `"h"` oder mehrere (`"wdh"`). Beine, Armlehnen, Platten und Griffe
+  behalten so ihre Größe und ihren Abstand zur Kante des Möbels, die Teile dazwischen (Sitzfläche,
+  Korpus) strecken sich. Je Achse gibt es damit eine feste Zone an jedem Ende und eine Mitte, die
+  wächst; ein festes Teil in der Mitte bleibt mittig. Reicht der Platz für die festen Teile nicht
+  (ein sehr schmales Möbel), skaliert alles wie früher.
 - `parts` (max. 60): `box`, `cyl` oder `loft`. Alle Maße sind **Anteile der Möbelgröße**: `x`/`z`
   Mitte (−0,5 … 0,5, vorne ist +z), `w`/`d` Breite/Tiefe (0 … 1), `y` Unterkante und `h` Höhe (0 … 1
   der Höhe). Ein Zylinder hat den kleineren Wert von `w` und `d` als Durchmesser; mit `axis: "x"` oder
@@ -81,6 +87,16 @@ dessen öffentlicher Schlüssel zusätzlich in `PACK_PUBLIC_KEYS` eingetragen un
 - `screen`: ein Teil mit `"screen": true` ist ein Bildschirm (Fernseher, Monitor). Das Möbel lässt sich
   dann mit einem Media Player verknüpfen; die Vorderseite (+z) zeigt die Farbe der laufenden App und
   ihr Bild, wie die eingebauten Fernseher.
+- **Bibliothek** (optional, ab NeonPlan 1.23 – ältere Versionen lehnen Packs mit diesen Feldern ab,
+  also die Mindestversion setzen): `group` sagt, was das Möbel ist (`sofa`, `seating`, `table`,
+  `storage`, `bed`, `kitchen`, `appliance`, `bath`, `lamp`, `media`, `office`, `tech`, `heating`,
+  `energy`, `household`, `deco`, `plant`, `outdoor`, `kids`, `sport`, `pets`, `vehicle`, `stairs`,
+  `architecture`), `room` die Räume, für die es gedacht ist (`living`, `dining`, `kitchen`,
+  `bedroom`, `kids`, `bath`, `office`, `hall`, `utility`, `garage`, `garden`, `hobby`; leer = überall),
+  `tags` weitere Suchwörter. `family` fasst Varianten eines Möbels (ein Tisch in drei Längen) zu
+  einer Karte zusammen, `variant` (Text je Sprache wie `name`) beschriftet den Chip der Variante.
+  Ohne diese Felder ordnet NeonPlan das Möbel nach seinen Wörtern und dem Pack ein; Varianten
+  erkennt es an der Größe am Ende der ID (`table_160`) und an den Zahlen im Namen.
 
 ## Feature-Packs (NeonPlan Pro)
 

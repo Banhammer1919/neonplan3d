@@ -14,6 +14,7 @@ const DEFAULTS: Partial<CardConfig> = {
   walls: "auto",
   explode: true,
   roof_fade: true,
+  roof: true,
   camera_wall: false,
   quality: "auto",
   stats: false,
@@ -29,6 +30,8 @@ const DEFAULTS: Partial<CardConfig> = {
   floor_stack: "dim",
   alerts: true,
   alert_jump: false,
+  director: false,
+  voice: false,
   scenes: true,
   motion_trail: false,
   time_travel: false,
@@ -108,7 +111,7 @@ export class Floorplan3dCardEditor extends LitElement {
     </label>`;
   }
 
-  private toggle(key: "explode" | "roof_fade" | "camera_wall" | "energy" | "room_panel" | "stats" | "fullscreen_button" | "room_names" | "alerts" | "alert_jump" | "scenes" | "idle_orbit" | "motion_trail" | "time_travel" | "household_card" | "weather", label: I18nKey, hint?: I18nKey) {
+  private toggle(key: "explode" | "roof_fade" | "roof" | "camera_wall" | "energy" | "room_panel" | "stats" | "fullscreen_button" | "room_names" | "alerts" | "alert_jump" | "director" | "voice" | "scenes" | "idle_orbit" | "motion_trail" | "time_travel" | "household_card" | "weather", label: I18nKey, hint?: I18nKey) {
     const on = this.value[key];
     return html`<label class="toggle">
       <input type="checkbox" .checked=${on} @change=${(e: Event) => this.set(key, (e.target as HTMLInputElement).checked)} />
@@ -252,6 +255,15 @@ export class Floorplan3dCardEditor extends LitElement {
       .sort();
     return html`<h3>${this.t("card_section_features")}</h3>
       ${this.toggle("alerts", "card_alerts", "card_alerts_hint")} ${this.toggle("alert_jump", "card_alert_jump", "card_alert_jump_hint")}
+      ${this.toggle("director", "card_director", "card_director_hint")}
+      ${this.toggle("voice", "card_voice", "card_voice_hint")}
+      <div class="grid">
+        <label class="field wide"
+          >${this.t("screen_name")}
+          <input type="text" placeholder=${this.t("screen_name_placeholder")} .value=${v.screen ?? ""} @change=${(e: Event) => this.set("screen", (e.target as HTMLInputElement).value.trim() || undefined)} />
+        </label>
+      </div>
+      <p class="hint">${this.t("screen_name_hint")}</p>
       ${this.toggle("scenes", "card_scenes", "card_scenes_hint")}
       ${this.toggle("motion_trail", "card_motion_trail", "card_motion_trail_hint")} ${this.toggle("camera_wall", "card_camera_wall", "card_camera_wall_hint")}
       ${this.toggle("time_travel", "card_time_travel", "card_time_travel_hint")}
@@ -308,7 +320,8 @@ export class Floorplan3dCardEditor extends LitElement {
             }}
           />
         </label>
-        ${this.select("theme", "theme", [["neon", "theme_neon"], ["blueprint", "theme_blueprint"], ["day", "theme_day"]], v.theme)}
+        ${this.select("theme", "theme", [["neon", "theme_neon"], ["blueprint", "theme_blueprint"], ["day", "theme_day"], ["auto", "theme_auto"]], v.theme)}
+        ${this.select("clock", "clock", [["off", "clock_off"], ["tl", "clock_tl"], ["tr", "clock_tr"], ["bl", "clock_bl"], ["br", "clock_br"]], v.clock ?? "off")}
         <label class="field"
           >${this.t("accent")}
           <input type="color" .value=${this._config.accent ?? "#37e0ff"} @input=${(e: Event) => this.set("accent", (e.target as HTMLInputElement).value)} />
@@ -323,7 +336,8 @@ export class Floorplan3dCardEditor extends LitElement {
 
       <h3>${this.t("card_section_show")}</h3>
       <div class="grid">
-        ${this.select("markers", "markers", [["none", "markers_none"], ["important", "markers_important"], ["all", "markers_all"]], v.markers)}
+        ${this.select("markers", "markers", [["none", "markers_none"], ["room", "markers_room"], ["important", "markers_important"], ["all", "markers_all"]], v.markers)}
+        ${this.select("marker_size", "pin_size", [["small", "pin_size_small"], ["normal", "pin_size_normal"], ["large", "pin_size_large"]], v.marker_size ?? "normal")}
         ${this.select("heatmap", "heatmap", [["none", "heat_off"], ["temperature", "heat_temperature"], ["humidity", "heat_humidity"], ["co2", "heat_co2"], ["values", "heat_values"]], v.heatmap)}
         <label class="field wide"
           >${this.t("flows")}
@@ -352,7 +366,7 @@ export class Floorplan3dCardEditor extends LitElement {
       ${this.renderThumbsToggle()} ${this.toggle("room_names", "card_room_names")}
       ${this.toggle("energy", "card_energy")} ${this.toggle("room_panel", "card_room_panel", "card_room_panel_hint")}
       ${this.toggle("fullscreen_button", "card_fullscreen_button", "card_fullscreen_button_hint")}
-      ${this.toggle("explode", "card_explode")} ${this.toggle("roof_fade", "card_roof_fade", "card_roof_fade_hint")} ${this.toggle("stats", "card_stats", "card_stats_hint")}
+      ${this.toggle("explode", "card_explode")} ${this.toggle("roof", "card_roof", "card_roof_hint")} ${this.toggle("roof_fade", "card_roof_fade", "card_roof_fade_hint")} ${this.toggle("stats", "card_stats", "card_stats_hint")}
       ${this.renderFeatures()}
       ${this.renderKiosk()}
     `;

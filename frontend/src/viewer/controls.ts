@@ -48,6 +48,8 @@ export class OrbitControls {
    * kept for furniture, the middle and right buttons turn the view instead of panning it; fingers are unchanged.
    */
   leftDragTurns = true;
+  /** 3D lock (idea from dlavrantonis' fork): the angle stays put – a drag moves the view, zooming still works. */
+  angleLock = false;
 
   private pointers = new Map<number, { x: number; y: number; button: number; type: string }>();
   private velocity = { theta: 0, phi: 0 };
@@ -122,13 +124,17 @@ export class OrbitControls {
     return active;
   }
 
-  flyTo(to: Partial<OrbitView>, duration = 700): void {
+  /** `saved`: a start view saved for the house, a floor or a room – its angle applies even under the 3D lock (#645). */
+  flyTo(to: Partial<OrbitView>, duration = 700, saved = false): void {
     const from = { ...this.view, target: this.view.target.clone() };
     // take the short way round
     let theta = to.theta ?? from.theta;
     while (theta - from.theta > Math.PI) theta -= 2 * Math.PI;
     while (theta - from.theta < -Math.PI) theta += 2 * Math.PI;
-    const target = { target: (to.target ?? from.target).clone(), radius: to.radius ?? from.radius, theta, phi: to.phi ?? from.phi };
+    // locked: the flight moves and zooms, the angle stays
+    const target = this.angleLock && !saved
+      ? { target: (to.target ?? from.target).clone(), radius: to.radius ?? from.radius, theta: from.theta, phi: from.phi }
+      : { target: (to.target ?? from.target).clone(), radius: to.radius ?? from.radius, theta, phi: to.phi ?? from.phi };
     this.velocity = { theta: 0, phi: 0 };
     if (duration <= 0 || matchMedia("(prefers-reduced-motion: reduce)").matches) {
       this.view = target;
@@ -150,7 +156,7 @@ export class OrbitControls {
 
   private onDown(e: PointerEvent): void {
     this.el.setPointerCapture(e.pointerId);
-    if (this.pointers.size === 0 && e.button === 0 && this.events.grab?.(...this.local(e))) {
+    if (this.pointers.size === 0 && e.button === 0 && this.events.grab && this.events.grab(...this.local(e))) {
       this.grabbing = true;
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, button: e.button, type: e.pointerType });
       this.flight = null;
@@ -182,7 +188,7 @@ export class OrbitControls {
     const p = this.pointers.get(e.pointerId);
     if (!p) return;
     if (this.grabbing) {
-      this.events.drag?.(...this.local(e));
+      if (this.events.drag) this.events.drag(...this.local(e));
       return;
     }
     const dx = e.clientX - p.x;
@@ -219,7 +225,7 @@ export class OrbitControls {
         p.y = e.clientY;
         return;
       }
-      const pan = (p.button === 1 || p.button === 2 || e.shiftKey) && (this.leftDragTurns || !mouse);
+      const pan = this.angleLock || ((p.button === 1 || p.button === 2 || e.shiftKey) && (this.leftDragTurns || !mouse));
       if (pan) this.pan(dx, dy);
       else {
         const h = this.el.clientHeight || 1;

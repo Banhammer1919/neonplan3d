@@ -135,6 +135,7 @@ async def test_activate_install_and_update(hass: HomeAssistant, hass_ws_client, 
     ]
     catalog["loyalty"] = {"code": "NP-TREUE-AB12CD", "percent": 10}
     catalog["supporter"] = {"code": "NPS-7KQ4-X2M9", "until": "2027-12-31"}
+    catalog["newsletter"] = {"url": "https://shop/newsletter"}
     aioclient_mock.post(f"{lic.SHOP_API}/catalog", json=catalog)
     aioclient_mock.post(
         f"{lic.SHOP_API}/pack", text=_sign(private, keys, {**PAYLOAD, "instance": fp, "licensee": "Anna", "release": 2})
@@ -153,6 +154,7 @@ async def test_activate_install_and_update(hass: HomeAssistant, hass_ws_client, 
     assert status["offers"][0]["image"] is None and status["offers"][0]["kind"] == "pack"
     assert status["loyalty"] == {"code": "NP-TREUE-AB12CD", "percent": 10}
     assert status["supporter"] == {"code": "NPS-7KQ4-X2M9", "until": "2027-12-31"}
+    assert status["newsletter"] == {"url": "https://shop/newsletter"}
 
     # the request carries our own User-Agent (the host blocks aiohttp's default one)
     assert aioclient_mock.mock_calls[-1][3]["User-Agent"].startswith("NeonPlan3D/")
@@ -185,6 +187,7 @@ async def test_activate_install_and_update(hass: HomeAssistant, hass_ws_client, 
     status = (await client.receive_json())["result"]
     assert not status["active"] and len(hass.data[DOMAIN].packs) == 1
     assert status["offers"] == [] and status["loyalty"] is None and status["supporter"] is None
+    assert status["newsletter"] is None
 
 
 async def test_a_pack_that_newly_belongs_to_the_customer_is_announced_once(
@@ -229,6 +232,17 @@ async def test_a_pack_that_newly_belongs_to_the_customer_is_announced_once(
     )
     await lic.async_install(hass, hass.data[DOMAIN], gift["id"])
     assert "neonplan3d_pack_mastershort.fun_halloween" in dismissed
+
+    # four taster packs at once: one notice for all of them, gone once one is installed
+    samples = [
+        {"id": f"mastershort.{n}_sample", "name": n, "release": 1, "url": "https://shop/s"}
+        for n in ("living", "kitchen", "bedroom", "bath")
+    ]
+    notices.clear()
+    aioclient_mock.clear_requests()
+    aioclient_mock.post(f"{lic.SHOP_API}/catalog", json={"licensee": "Anna", "packs": [living, gift, *samples]})
+    await lic.async_refresh(hass, hass.data[DOMAIN], install_updates=False)
+    assert notices == [("neonplan3d_packs_new", "NeonPlan 3D: 4 new packs are ready")]
 
 
 async def test_a_pack_bound_elsewhere_is_refused_on_import(hass: HomeAssistant, hass_ws_client, monkeypatch) -> None:

@@ -6,7 +6,7 @@
 import { Color } from "three";
 import type { Building, Floor, RoofSection, SolarField, Vec2 } from "../model.ts";
 import { polygonArea } from "../model.ts";
-import { cutHole, sectionFloor, dormerHoles, dormerParent, effectiveDormer, offsetPolygon, sectionGeometry, sectionHeightAt, sectionPolygon, sectionFrame, sectionOverhang, sectionProfile, sectionUV, type Q, type SectionOverhang } from "../roof-sections.ts";
+import { coversIn, cutHole, cutUnder, lineOutside, meetLine, sectionCovers, sectionFloor, sectionsCut, dormerHoles, dormerParent, effectiveDormer, offsetPolygon, sectionGeometry, sectionHeightAt, sectionPolygon, sectionFrame, sectionOverhang, sectionProfile, sectionUV, wingJunction, wingSection, type LocalCover, type Q, type SectionOverhang } from "../roof-sections.ts";
 import { DEG, GeoBuffer, LineBuffer, pushPrism, shade } from "./geo.ts";
 import { fieldModules, roofFaces, roofWindowRoom, windowCorners, type RoofFace } from "../solar.ts";
 
@@ -31,7 +31,9 @@ const WINDOW_FRAME = shade(0xc9d3e6, 0.85);
 /** The frame of an open or tilted roof window glows warm, like a wall window does. */
 const WINDOW_WARM = shade(0xffb347, 0.95);
 const WINDOW_GLASS = new Color(0x2b6b8f);
-const WINDOW_BLIND = new Color(0x3a4258);
+const WINDOW_BLIND = new Color(0x1a2742);
+/** The faint cyan edge of each slat (like the blind texture of the windows in the walls). */
+const WINDOW_SLAT = new Color(0x37e0ff).multiplyScalar(0.35);
 /** The frame's sides between the roof and the sash: they close the gap a low view looked through (#490). */
 const WINDOW_CURB = new Color(0x4a566f);
 
@@ -58,14 +60,14 @@ export interface RoofGeometry {
    * The roof windows of this part, apart from the roof: they stay when the roof fades out over a room, so the
    * room shows its windows in the slope, open or shut, the blind down or up (#482).
    */
-  win?: { solid: GeoBuffer; lines: LineBuffer };
+  win?: { solid: GeoBuffer; lines: LineBuffer; glass: GeoBuffer };
   /** The roof windows that only show in the roof: they fade out with it (the default). */
-  winRoof?: { solid: GeoBuffer; lines: LineBuffer };
+  winRoof?: { solid: GeoBuffer; lines: LineBuffer; glass: GeoBuffer };
   /**
    * Floating roof windows over a room of a LOWER floor (a slope reaching down over it, #482): they belong to that
    * floor and show with it, in its own heights (its floor at 0).
    */
-  winBelow?: Map<string, { floor: Floor; solid: GeoBuffer; lines: LineBuffer }>;
+  winBelow?: Map<string, { floor: Floor; solid: GeoBuffer; lines: LineBuffer; glass: GeoBuffer }>;
 }
 
 /** The floor the roof sits on: the highest one with rooms. */
@@ -106,10 +108,10 @@ function pushRoofWindows(b: Building, parts: RoofGeometry[], states: ReadonlyMap
     const st = states.get(w.id) ?? { open: 0, tilt: 0, cover: 0 };
     const float = !!room && (below !== null || room.floor.id === part.floor.id);
     const win = below
-      ? ((part.winBelow ??= new Map()).get(below.id) ?? part.winBelow.set(below.id, { floor: below, solid: new GeoBuffer(), lines: new LineBuffer() }).get(below.id)!)
+      ? ((part.winBelow ??= new Map()).get(below.id) ?? part.winBelow.set(below.id, { floor: below, solid: new GeoBuffer(), lines: new LineBuffer(), glass: new GeoBuffer() }).get(below.id)!)
       : float
-        ? (part.win ??= { solid: new GeoBuffer(), lines: new LineBuffer() })
-        : (part.winRoof ??= { solid: new GeoBuffer(), lines: new LineBuffer() });
+        ? (part.win ??= { solid: new GeoBuffer(), lines: new LineBuffer(), glass: new GeoBuffer() })
+        : (part.winRoof ??= { solid: new GeoBuffer(), lines: new LineBuffer(), glass: new GeoBuffer() });
     const up = (p: number[], k: number) => [p[0] + face.n[0] * k, p[1] + face.n[1] * k, p[2] + face.n[2] * k];
     const mix = (p: number[], q: number[], t: number) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
     // the fixed frame in the roof; it glows warm while the window is open or tilted
@@ -135,8 +137,9 @@ function pushRoofWindows(b: Building, parts: RoofGeometry[], states: ReadonlyMap
     const top1 = up(d, 0.065);
     const bot0 = swing(top0);
     const bot1 = swing(top1);
-    win.solid.tri(bot0, bot1, top1, WINDOW_GLASS);
-    win.solid.tri(bot0, top1, top0, WINDOW_GLASS);
+    // see-through glass like a window in a wall (#598): only a shut blind closes it
+    win.glass.tri(bot0, bot1, top1, WINDOW_GLASS);
+    win.glass.tri(bot0, top1, top0, WINDOW_GLASS);
     for (const [p, q] of [[bot0, bot1], [bot1, top1], [top1, top0], [top0, bot0]]) win.lines.seg(p, q, frame);
     // the blind comes down from the top over the sash
     if (st.cover > 0.02) {
@@ -147,6 +150,12 @@ function pushRoofWindows(b: Building, parts: RoofGeometry[], states: ReadonlyMap
       const t1 = up(top1, 0.01);
       win.solid.tri(b0, b1, t1, WINDOW_BLIND);
       win.solid.tri(b0, t1, t0, WINDOW_BLIND);
+      // its slats across, like the blinds of the windows in the walls (#598)
+      const slats = Math.max(1, Math.round((h * k) / 0.05));
+      for (let i = 1; i <= slats; i++) {
+        const t = i / slats;
+        win.lines.seg(up(mix(t0, b0, t), 0.004), up(mix(t1, b1, t), 0.004), WINDOW_SLAT);
+      }
     }
   }
 }
@@ -259,8 +268,22 @@ function buildSections(b: Building, sections: readonly RoofSection[], overhang: 
   if (!floors.length) return [];
   const parts = new Map<string, RoofGeometry>();
   const faceMap = new Map(roofFaces(b).map((f) => [f.key, f]));
-  for (const sec of sections) {
-    if (Math.abs(sec.x1 - sec.x0) < 0.1 || Math.abs(sec.z1 - sec.z0) < 0.1) continue;
+  const usable = sections.filter((sec) => Math.abs(sec.x1 - sec.x0) >= 0.1 && Math.abs(sec.z1 - sec.z0) >= 0.1);
+  // what each section draws: a dormer only as deep as its ridge meets the slope, a wing running into another
+  // roof on to that roof's ridge line without an overhang there (#605) – the other roof's planes cut it off
+  const plans = new Map(
+    usable.map((sec) => {
+      const parent = dormerParent(sections, sec);
+      const junction = parent ? null : wingJunction(sections, sec);
+      const drawn = parent ? effectiveDormer(parent, sec) : junction ? wingSection(sec, junction) : sec;
+      const own = sectionOverhang(b, parent ? drawn : sec, drawn.overhang ?? overhang);
+      const ov: SectionOverhang = junction ? { ...own, [junction.end === 0 ? "u0" : "u1"]: 0 } : own;
+      const sloped = !drawn.open && drawn.shape !== "flat" && drawn.shape !== "parapet";
+      return [sec, { parent, junction, drawn, ov, covers: sloped ? sectionCovers(drawn, sectionGeometry(drawn, ov).faces) : [] }] as const;
+    }),
+  );
+  for (const sec of usable) {
+    const plan = plans.get(sec)!;
     // the floor the section sits on: the highest one that starts below its walls' top
     const floor = sectionFloor(b, sec) ?? floors[0];
     // canopies get a part of their own: it rides with the floor but never lifts off like a roof
@@ -271,7 +294,7 @@ function buildSections(b: Building, sections: readonly RoofSection[], overhang: 
     // an attic: the floor's walls rise above the section's base, so they end under the slopes
     // themselves (knee walls, gables) and the roof draws none of its own; a dormer keeps its cheeks
     // a dormer or a cross gable (a smaller section on a bigger one) keeps its cheeks and front gable
-    const parent = dormerParent(sections, sec);
+    const parent = plan.parent;
     const attic = floor.elevation + floor.height > sec.base + 0.05 && !sec.dormer && !parent;
     // the slope opens under every dormer and cross gable sitting on this section, and under its roof windows
     const holes = sections.filter((d) => d !== sec && dormerParent(sections, d) === sec).flatMap((d) => dormerHoles(sec, d));
@@ -284,8 +307,9 @@ function buildSections(b: Building, sections: readonly RoofSection[], overhang: 
     }
     // a dormer's rear runs into the slope: no gable there, only at its front (the lower end of the slope)
     // a dormer only as deep as its ridge needs to meet the slope
-    const drawn = parent ? effectiveDormer(parent, sec) : sec;
-    let frontEnd: 0 | 1 | null = null;
+    const drawn = plan.drawn;
+    // a wing has no gable where it runs into the other roof
+    let frontEnd: 0 | 1 | null = plan.junction ? ((1 - plan.junction.end) as 0 | 1) : null;
     if (parent) {
       const fr = sectionFrame(drawn);
       const pg = sectionGeometry(parent, { u0: 0, u1: 0, a: 0, b: 0 });
@@ -296,10 +320,29 @@ function buildSections(b: Building, sections: readonly RoofSection[], overhang: 
       };
       frontEnd = h(fr.u0) <= h(fr.u1) ? 0 : 1;
     }
-    pushSection(part.solid, part.lines, drawn, sectionOverhang(b, drawn, drawn.overhang ?? overhang), floor.elevation, part.glass, attic, holes, frontEnd);
+    // where sections overlap, each keeps only what shows above the others (#466, #605); the line where two
+    // roofs meet is drawn once, by the first of the two
+    const others = usable.filter((q) => sectionsCut(sections, sec, q));
+    const cut: SectionCut | null = others.length
+      ? {
+          covers: coversIn(drawn, others.flatMap((q) => plans.get(q)!.covers)),
+          lines: coversIn(drawn, others.filter((q) => usable.indexOf(q) > usable.indexOf(sec)).flatMap((q) => plans.get(q)!.covers)),
+          wallU: plan.junction ? [sectionFrame(sec).u0, sectionFrame(sec).u1] : null,
+        }
+      : null;
+    pushSection(part.solid, part.lines, drawn, plan.ov, floor.elevation, part.glass, attic, holes, frontEnd, cut);
   }
   // the closed roofs first: the first part is the one the main roof's solar fields belong to
   return [...parts.values()].sort((p, q) => Number(p.lift === false) - Number(q.lift === false));
+}
+
+/** Other sections over this one (in its frame): its planes end where they go under them (#466, #605). */
+export interface SectionCut {
+  covers: LocalCover[];
+  /** The covers whose meeting line (a valley) this section draws. */
+  lines: LocalCover[];
+  /** A wing: its walls stay within its own length (u0, u1), not on into the roof it runs into. */
+  wallU: [number, number] | null;
 }
 
 /**
@@ -317,6 +360,7 @@ export function pushSection(
   holes: { u0: number; u1: number; v0: number; v1: number }[] = [],
   /** A dormer: its gable only at this end (0 = u0, 1 = u1); null for an ordinary section. */
   frontEnd: 0 | 1 | null = null,
+  cut: SectionCut | null = null,
 ): void {
   const fr = sectionFrame(s);
   const pr = sectionProfile(s);
@@ -340,7 +384,8 @@ export function pushSection(
   let faces: Q[][] = [];
   let rim: Q[] = [];
   let ridges: [Q, Q][] = [];
-  let gableProfile: [number, number][] | null = null;
+  let gableProfiles: [[number, number][] | null, [number, number][] | null] = [null, null];
+  const meets: [Q, Q][] = [];
   if (s.shape === "flat" || s.shape === "parapet") {
     const y = s.eave_a;
     const parapet = s.shape === "parapet";
@@ -378,7 +423,16 @@ export function pushSection(
     for (const h of holes) faces = faces.flatMap((f) => cutHole(f, h));
     rim = geom.rim;
     ridges = geom.ridges;
-    gableProfile = geom.gable;
+    gableProfiles = geom.gables;
+    if (cut) {
+      // where this roof runs into another one: the line where they meet, then only what shows above the other
+      for (const f of faces)
+        for (const c of cut.lines) {
+          const m = meetLine(f, c.poly);
+          if (m) for (const [p, q] of lineOutside(m[0], m[1], cut.covers.filter((x) => x !== c))) meets.push([p, q]);
+        }
+      faces = faces.flatMap((f) => cutUnder(f, cut.covers));
+    }
   }
   // a canopy has thin see-through panels; a closed roof its tiles with their thickness below
   const open = !!s.open;
@@ -392,30 +446,37 @@ export function pushSection(
     fan(f.map(([u, v, y]) => P(u, v, y - THICK)), under);
   }
   // the rim: eaves and rakes with the roof's thickness
+  // (only where it is not under another section)
+  const outside = (p: Q, q: Q): [Q, Q][] => (cut ? lineOutside(p, q, cut.covers) : [[p, q]]);
   for (let i = 0; i < rim.length; i++) {
-    const [ua, va, ya] = rim[i];
-    const [ub, vb, yb] = rim[(i + 1) % rim.length];
-    if (!open) fan([P(ua, va, ya), P(ub, vb, yb), P(ub, vb, yb - THICK), P(ua, va, ya - THICK)], under);
-    lines.seg(P(ua, va, ya), P(ub, vb, yb), open ? RIDGE : EAVE);
+    for (const [[ua, va, ya], [ub, vb, yb]] of outside(rim[i], rim[(i + 1) % rim.length])) {
+      if (!open) fan([P(ua, va, ya), P(ub, vb, yb), P(ub, vb, yb - THICK), P(ua, va, ya - THICK)], under);
+      lines.seg(P(ua, va, ya), P(ub, vb, yb), open ? RIDGE : EAVE);
+    }
   }
   if (open) {
     pushCanopyFrame(solid, lines, fr, pr, ov, P, yOff);
     return;
   }
-  for (const [[ua, va, ya], [ub, vb, yb]] of ridges) lines.seg(P(ua, va, ya + 0.004), P(ub, vb, yb + 0.004), RIDGE);
+  for (const [p, q] of ridges) for (const [[ua, va, ya], [ub, vb, yb]] of outside(p, q)) lines.seg(P(ua, va, ya + 0.004), P(ub, vb, yb + 0.004), RIDGE);
+  // the valleys where it meets another section
+  for (const [[ua, va, ya], [ub, vb, yb]] of meets) lines.seg(P(ua, va, ya + 0.004), P(ub, vb, yb + 0.004), RIDGE);
   // walls up under the roof, from the section's base: the gable ends (not under a hip) …
   const base = s.base;
   if (attic) return;
-  if (gableProfile) {
-    const poly = above(gableProfile, base - THICK);
-    const ends = frontEnd === null ? [fr.u0, fr.u1] : [frontEnd === 0 ? fr.u0 : fr.u1];
-    if (poly.length >= 3) for (const u of ends) fan(poly.map(([v, y]) => P(u, v, y)), g);
+  for (const end of [0, 1] as const) {
+    const profile = gableProfiles[end];
+    if (!profile || (frontEnd !== null && frontEnd !== end)) continue;
+    const poly = above(profile, base - THICK);
+    const u = end === 0 ? fr.u0 : fr.u1;
+    if (poly.length >= 3) fan(poly.map(([v, y]) => P(u, v, y)), g);
   }
   // … and the knee walls along the eaves where the roof starts above the walls (a high back wall of a pent roof)
   if (s.shape !== "flat" && s.shape !== "parapet") {
+    const [wu0, wu1] = cut?.wallU ?? [fr.u0, fr.u1];
     for (const v of [0, w]) {
       const y = pr.y(v) - THICK;
-      if (y > base + 0.02) fan([P(fr.u0, v, base), P(fr.u1, v, base), P(fr.u1, v, y), P(fr.u0, v, y)], g);
+      if (y > base + 0.02) fan([P(wu0, v, base), P(wu1, v, base), P(wu1, v, y), P(wu0, v, y)], g);
     }
   } else if (s.eave_a > base + 0.02) {
     for (const [ua, va, ub, vb] of [[fr.u0, 0, fr.u1, 0], [fr.u1, 0, fr.u1, w], [fr.u1, w, fr.u0, w], [fr.u0, w, fr.u0, 0]])

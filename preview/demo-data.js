@@ -46,6 +46,7 @@ export const DEMO_AREAS = {
   heizung: { area_id: "heizung", name: "Heizungsraum", floor_id: "keller" },
   vorrat: { area_id: "vorrat", name: "Vorratsraum", floor_id: "keller" },
   hobby: { area_id: "hobby", name: "Hobbyraum", floor_id: "keller" },
+  garten: { area_id: "garten", name: "Garten", floor_id: "erdgeschoss" },
 };
 
 export const DEMO_BUILDING = {
@@ -94,6 +95,10 @@ export const DEMO_PICTURES = {
     '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#101010"/><text x="160" y="105" text-anchor="middle" font-family="sans-serif" font-size="56" font-weight="900" fill="#e50914">LOGO</text></svg>',
   ),
 };
+const DOOR_STILL = svgPicture(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a2440"/><stop offset="1" stop-color="#3b3350"/></linearGradient></defs><rect width="320" height="180" fill="url(#s)"/><rect x="0" y="118" width="320" height="62" fill="#2b2f38"/><polygon points="120,180 200,180 178,118 142,118" fill="#4a4f5c"/><rect x="40" y="70" width="36" height="48" fill="#1d3b2a"/><rect x="250" y="62" width="44" height="56" fill="#1d3b2a"/><rect x="146" y="96" width="28" height="22" fill="#20242c"/><circle cx="160" cy="62" r="12" fill="#c9a27a"/><rect x="146" y="74" width="28" height="46" rx="8" fill="#3c6ea8"/><rect x="0" y="0" width="320" height="16" fill="#00000066"/><text x="8" y="12" font-family="monospace" font-size="10" fill="#e6eefc">HAUSTUER  18:42:07</text></svg>',
+);
+
 const CAMERA_STILL = svgPicture(
   '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#1b2230"/><rect x="0" y="120" width="320" height="60" fill="#2a3444"/><rect x="40" y="60" width="90" height="70" fill="#3b4a60"/><rect x="190" y="40" width="80" height="90" fill="#324055"/><text x="12" y="20" font-family="monospace" font-size="12" fill="#cfd8e6">KAMERA 1  12:04:31</text></svg>',
 );
@@ -126,11 +131,12 @@ const DEVICES = [
   light("bad", "Bad Spots", "bad", true, { brightness: 220, color_temp_kelvin: 4000 }),
   light("flur", "Flurlicht", "flur", true, { brightness: 120 }),
   light("kinderzimmer", "Kinderzimmer Decke", "kinderzimmer", true, { brightness: 150 }),
+  entity("fan.kinderzimmer", "kinderzimmer", "on", { friendly_name: "Kinderzimmer Ventilator", percentage: 66, percentage_step: 33 }),
   light("schreibtisch", "Schreibtischlampe", "arbeitszimmer", true, { color_temp_kelvin: 4500 }),
   light("esstisch", "Esstisch Pendel", "kueche", true, { brightness: 140 }),
   light("kueche_links", "Küche links", "kueche", true, { brightness: 230, color_mode: "hs", rgb_color: [255, 70, 40] }),
   light("kueche_rechts", "Küche rechts", "kueche", true, { brightness: 230, color_mode: "hs", rgb_color: [60, 110, 255] }),
-  light("garten", "Garten Wegleuchten", null, true, { brightness: 170 }),
+  light("garten", "Garten Wegleuchten", "garten", true, { brightness: 170 }),
   light("pool", "Pool Spot", null, true, { brightness: 200, color_mode: "hs", rgb_color: [40, 200, 255] }),
   light("haustuer", "Haustür Außenlicht", "flur", true, { brightness: 200 }),
   light("led_band", "LED Band", "wohnzimmer", true, { brightness: 160, color_mode: "hs", rgb_color: [120, 90, 255], effect: "colorloop", effect_list: ["colorloop", "none"] }),
@@ -160,11 +166,15 @@ const DEVICES = [
   entity("media_player.bad_lautsprecher", "bad", "playing", { friendly_name: "Bad Lautsprecher", device_class: "speaker", media_title: "Blue Train", media_artist: "John Coltrane", volume_level: 0.3, entity_picture: COVER, group_members: ["media_player.kueche_lautsprecher", "media_player.bad_lautsprecher"] }),
   entity("switch.kaffeemaschine", "kueche", "on", { friendly_name: "Kaffeemaschine" }),
   entity("camera.wohnzimmer", "wohnzimmer", "idle", { friendly_name: "Wohnzimmer Kamera", entity_picture: CAMERA_STILL }),
+  // the front door: a camera and its doorbell (one device), for the live director
+  entity("camera.haustuer", "flur", "idle", { friendly_name: "Haustür Kamera", entity_picture: DOOR_STILL }),
+  entity("event.haustuer_klingel", "flur", "2026-10-19T08:00:00.000Z", { friendly_name: "Haustür Klingel", device_class: "doorbell", event_type: "ring" }),
   entity("sensor.wohnzimmer_temperatur", "wohnzimmer", "21.4", { friendly_name: "Wohnzimmer Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   entity("sensor.kueche_temperatur", "kueche", "23.4", { friendly_name: "Küche Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   entity("sensor.schlafzimmer_temperatur", "schlafzimmer", "18.1", { friendly_name: "Schlafzimmer Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   entity("sensor.bad_temperatur", "bad", "24.6", { friendly_name: "Bad Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   entity("sensor.flur_temperatur", "flur", "19.6", { friendly_name: "Flur Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
+  entity("sensor.garten_temperatur", "garten", "14.2", { friendly_name: "Garten Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   entity("sun.sun", null, "above_horizon", { friendly_name: "Sonne", elevation: 32, azimuth: 205 }),
   entity("sensor.wohnzimmer_feuchte", "wohnzimmer", "48", { friendly_name: "Wohnzimmer Luftfeuchtigkeit", device_class: "humidity", unit_of_measurement: "%" }),
   entity("binary_sensor.kueche_fenster", "kueche", "on", { friendly_name: "Küche Fenster", device_class: "window" }),
@@ -212,6 +222,7 @@ const DEVICES = [
   // Haushalt Pro: an invented waste calendar and a "post" flag set by an automation
   entity("calendar.abfallkalender", null, "off", { friendly_name: "Abfallkalender", message: "Papier", all_day: true }),
   entity("input_boolean.post_da", null, "on", { friendly_name: "Post da" }),
+  entity("input_boolean.restmuell_rausgestellt", null, "on", { friendly_name: "Restmüll rausgestellt" }),
   entity("sensor.monstera_feuchte", null, "14", { friendly_name: "Monstera Feuchte", device_class: "moisture", unit_of_measurement: "%" }),
   entity("sensor.waschmaschine_restzeit", null, "23", { friendly_name: "Waschmaschine Restzeit", unit_of_measurement: "min" }),
   entity("binary_sensor.kuehlschrank_filter", null, "on", { friendly_name: "Kühlschrank Wasserfilter", device_class: "problem" }),
@@ -262,6 +273,8 @@ for (const [suffix, name] of [
 // devices with a power sensor of their own
 for (const [id, device] of [
   ["camera.wohnzimmer", "d_cam"],
+  ["camera.haustuer", "d_door"],
+  ["event.haustuer_klingel", "d_door"],
   ["binary_sensor.wohnzimmer_kamera_bewegung", "d_cam"],
   ["binary_sensor.wohnzimmer_kamera_person", "d_cam"],
   ["media_player.fernseher", "d_tv"],
@@ -279,6 +292,7 @@ const place = (entity_id, x, z) => ({ entity_id, x, z, y: null });
 DEMO_BUILDING.floors[0].placements = [
   place("light.wohnzimmer_decke", 3.6, 2.6),
   { ...place("camera.wohnzimmer", 0.2, 0.2), mount: "wall", rotation: 315 },
+  { ...place("camera.haustuer", 8.25, 9.3), mount: "wall", rotation: 90 },
   { entity_id: "light.stehlampe", x: 5.3, z: 0.7, y: null, mount: "floor" },
   place("cover.wohnzimmer", 1.6, 0.4),
   place("climate.wohnzimmer", 0.5, 2.2),
@@ -299,7 +313,7 @@ DEMO_BUILDING.floors[0].placements.push(
   place("sensor.waschmaschine_leistung", 6.4, 6.9),
   place("sensor.akku_leistung", 7.3, 8.8),
 );
-DEMO_BUILDING.floors[1].placements = [place("light.kinderzimmer", 2.9, 2.8), place("light.schreibtisch", 6.2, 1.2), place("sensor.pc_leistung", 9.0, 0.9)];
+DEMO_BUILDING.floors[1].placements = [place("light.schreibtisch", 6.2, 1.2), place("sensor.pc_leistung", 9.0, 0.9)];
 // grid, solar and battery come from the devices in the garage (meter, inverter, home battery)
 DEMO_BUILDING.energy = {
   meter: null,
@@ -381,6 +395,9 @@ DEMO_BUILDING.floors[0].furniture = [
   item("table", 8.0, 2.9, 1.3, 0.85, 0.75),
   { ...item("lamp_pendant", 8.0, 2.9, 0.3, 0.3, 0.95), entity: "light.esstisch", variant: "globe" },
   { ...item("radiator", 0.08, 2.3, 1.0, 0.1, 0.6, 270), entity: "climate.wohnzimmer" },
+  // a double light switch by the door and a double socket on one relay (both sockets the same entity)
+  { ...item("wall_switch", 0.006, 1.0, 0.156, 0.012, 0.085, 270), gangs: [{ entity: "light.wohnzimmer_decke" }, { entity: "light.stehlampe" }] },
+  { ...item("wall_socket", 0.007, 3.0, 0.156, 0.014, 0.085, 270), gangs: [{ entity: "switch.kaffeemaschine" }, { entity: "switch.kaffeemaschine" }] },
   ...[
     [7.6, 10.4],
     [7.6, 12.4],
@@ -441,6 +458,8 @@ DEMO_BUILDING.floors[1].walls = [{ id: "wall_demo", a: [8, 8], b: [8, 6], thickn
 DEMO_BUILDING.floors[0].walls = [{ id: "wall_garage", a: [10, 1.1], b: [12.6, 1.1], thickness: null, height: null }];
 DEMO_BUILDING.floors[0].openings.push(hole("door", "garage", 0, 1.2, 0.9, { wall: "wall_garage" }));
 DEMO_BUILDING.floors[1].furniture = [
+  // a ceiling fan with light in the children's room: the blades turn with the fan
+  { ...item("lamp_fan", 2.9, 2.8, 1.3, 1.3, 0.45), entity: "light.kinderzimmer", fan: "fan.kinderzimmer" },
   item("bed", 1.0, 1.4, 1.0, 2.05, 0.8, 90),
   item("desk", 2.8, 3.8, 1.2, 0.6, 0.75, 180),
   item("rug", 2.2, 2.6, 1.6, 1.2, 0.01),
@@ -458,7 +477,8 @@ DEMO_BUILDING.floors[1].furniture = [
 // Invented garden and roof.
 const area = (id, type, x0, z0, x1, z1) => ({ id, type, points: [[x0, z0], [x1, z0], [x1, z1], [x0, z1]] });
 DEMO_BUILDING.floors[0].outdoor = [
-  area("a1", "lawn", -3, -8, 17, -0.3),
+  // the garden acts as a room: tapped, it opens with its lights and the outdoor temperature (#100)
+  { ...area("a1", "lawn", -3, -8, 17, -0.3), area_id: "garten", name: "Garten" },
   area("a2", "lawn", -3, 9.5, 6.5, 14),
   area("a3", "terrace", 1.5, -2.8, 6.2, -0.3),
   {

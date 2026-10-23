@@ -11,7 +11,6 @@ from custom_components.neonplan3d.card_resource import (
     async_remove_card_resource,
     loader_source,
     remove_loader,
-    write_loader,
 )
 
 
@@ -70,7 +69,7 @@ async def test_yaml_mode_and_old_layout() -> None:
 
 
 async def test_loader_resource_replaces_the_bundle_and_goes_on_removal() -> None:
-    """The loader in www takes the bundle's place in the resources (#461) and is removed with the integration."""
+    """The loader takes the bundle's place in the resources (#461) and is removed with the integration."""
     res = FakeResources([{"id": "a", "type": "module", "url": URL}])
     hass = SimpleNamespace(data={"lovelace": SimpleNamespace(resources=res)})
     loader = f"{LOADER_URL}?v=1.16.0-abc"
@@ -85,8 +84,10 @@ def test_loader_file(tmp_path) -> None:
     text = loader_source(URL)
     assert f'const url = "{URL}";' in text
     assert "customElements.get(tag)" in text
-    write_loader(tmp_path, URL)
-    written = tmp_path / "neonplan3d" / "neonplan3d-loader.js"
-    assert written.read_text(encoding="utf-8") == text
+    # a loader that an older version left in www is removed, with its folder
+    old = tmp_path / "neonplan3d" / "neonplan3d-loader.js"
+    old.parent.mkdir()
+    old.write_text(text, encoding="utf-8")
     remove_loader(tmp_path)
     assert not (tmp_path / "neonplan3d").exists()
+    remove_loader(tmp_path)  # nothing there: no error

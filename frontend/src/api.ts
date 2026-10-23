@@ -19,6 +19,26 @@ export function subscribeBuilding(hass: HomeAssistant, callback: (revision: numb
   });
 }
 
+/** A sentence Assist or the service `neonplan3d.ask` hands to the open views. */
+export interface Ask {
+  ask_id: string;
+  text: string;
+  /** Only the view with this screen name reacts (null: every open view). */
+  screen: string | null;
+  /** The view speaks its answer (a satellite that asked speaks itself). */
+  speak: boolean;
+}
+
+export function subscribeAsk(hass: HomeAssistant, callback: (ask: Ask) => void): Promise<() => Promise<void>> {
+  return hass.connection.subscribeMessage<Ask>(callback, { type: "neonplan3d/voice/subscribe" });
+}
+
+/** The view's answer; `taken` is false when another view was first. */
+export async function answerAsk(hass: HomeAssistant, askId: string, text: string, answered: boolean): Promise<boolean> {
+  const res = await hass.callWS<{ taken: boolean }>({ type: "neonplan3d/voice/answer", ask_id: askId, text, answered });
+  return res.taken;
+}
+
 export async function fetchImage(hass: HomeAssistant, imageId: string): Promise<string> {
   const res = await hass.callWS<{ data: string }>({ type: "neonplan3d/image/get", image_id: imageId });
   return res.data;
@@ -63,6 +83,30 @@ export interface ImportedPack {
   publisher: string;
   licensee: string | null;
   items: number;
+  /** Module code that waits for an admin's approval on the extensions page before it runs. */
+  approval?: boolean;
+}
+
+/** A module's code for an admin to read before approving it (the installed code or the waiting update). */
+export interface ModuleReview {
+  id: string;
+  name: string;
+  publisher: string;
+  licensee: string | null;
+  release: number;
+  api: number;
+  kind: string;
+  sha: string;
+  code: string;
+}
+
+export function reviewModule(hass: HomeAssistant, packId: string, pending: boolean): Promise<ModuleReview> {
+  return hass.callWS<ModuleReview>({ type: "neonplan3d/modules/review", pack_id: packId, pending });
+}
+
+/** Approves exactly the reviewed code (by its fingerprint); from then on it runs. */
+export async function approveModule(hass: HomeAssistant, packId: string, sha: string): Promise<void> {
+  await hass.callWS({ type: "neonplan3d/modules/approve", pack_id: packId, sha });
 }
 
 /** Import a pack file; the backend checks its signature (errors carry a code, e.g. "bad_signature"). */
@@ -172,6 +216,8 @@ export interface LicenseStatus {
   loyalty?: ShopLoyalty | null;
   /** Supporter-Pass holders: the code that unlocks the supporter role on Discord (/supporter). */
   supporter?: { code: string; until: string | null } | null;
+  /** The shop's newsletter invitation (taster packs as a thank-you): only while the customer has not signed up. */
+  newsletter?: { url: string } | null;
   /** Pack updates installed from the shop, newest last. */
   updates?: PackUpdate[];
 }
@@ -243,4 +289,15 @@ export async function setDiagnostics(hass: HomeAssistant, enabled: boolean): Pro
 /** Ask the server to delete what was sent, forget the id and switch off (fails when the server is unreachable). */
 export async function deleteDiagnostics(hass: HomeAssistant): Promise<DiagnosticsStatus> {
   return hass.callWS<DiagnosticsStatus>({ type: "neonplan3d/diagnostics/delete" });
+}
+
+export type SentenceMode = "distinct" | "all" | "off";
+
+/** Which sentences Assist hands to NeonPlan (the sentence files Home Assistant reads). */
+export async function getVoiceSettings(hass: HomeAssistant): Promise<{ sentences: SentenceMode }> {
+  return hass.callWS({ type: "neonplan3d/voice/settings" });
+}
+
+export async function setVoiceSentences(hass: HomeAssistant, sentences: SentenceMode): Promise<{ sentences: SentenceMode; kept?: string[] }> {
+  return hass.callWS({ type: "neonplan3d/voice/settings/set", sentences });
 }

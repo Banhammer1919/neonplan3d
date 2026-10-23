@@ -18,6 +18,15 @@ interface Solid {
   gaps: [number, number][];
 }
 
+/** A piece of furniture standing on the floor, as a turned box (pets walk around it). */
+export interface Obstacle {
+  c: Vec2;
+  /** Unit direction of its width, half width and half depth. */
+  u: Vec2;
+  hw: number;
+  hd: number;
+}
+
 export interface DoorNode {
   /** Points on both sides of the opening, a little into each room. */
   p: [Vec2, Vec2];
@@ -26,15 +35,18 @@ export interface DoorNode {
 
 export class FloorMap {
   readonly solids: Solid[] = [];
+  /** Furniture to walk around (only when asked for: the pets do, a person walking through the house does not). */
+  readonly obstacles: Obstacle[] = [];
   readonly doors: DoorNode[] = [];
   readonly rooms: Room[];
   readonly walls: Wall[];
   readonly building: Building;
   readonly floor: Floor;
 
-  constructor(building: Building, floor: Floor) {
+  constructor(building: Building, floor: Floor, obstacles: readonly Obstacle[] = []) {
     this.building = building;
     this.floor = floor;
+    this.obstacles.push(...obstacles);
     const s = building.settings;
     this.rooms = floor.rooms.filter((r) => r.points.length >= 3);
     const result = generateWalls(this.rooms, { exterior: s.wall_exterior, interior: s.wall_interior }, floor.walls ?? []);
@@ -72,8 +84,23 @@ export class FloorMap {
     }
   }
 
-  /** True when a body standing at p touches a wall. */
+  /** True when a body standing at p touches a wall or a piece of furniture to walk around. */
   blocked(p: Vec2, r = RADIUS): boolean {
+    return this.wallAt(p, r) || this.obstacleAt(p, r) !== null;
+  }
+
+  /** The piece of furniture a body standing at p would touch. */
+  obstacleAt(p: Vec2, r = RADIUS): Obstacle | null {
+    for (const o of this.obstacles) {
+      const dx = p[0] - o.c[0];
+      const dz = p[1] - o.c[1];
+      if (Math.abs(dx * o.u[0] + dz * o.u[1]) < o.hw + r && Math.abs(-dx * o.u[1] + dz * o.u[0]) < o.hd + r) return o;
+    }
+    return null;
+  }
+
+  /** True when a body standing at p touches a wall. */
+  wallAt(p: Vec2, r = RADIUS): boolean {
     for (const s of this.solids) {
       const px = p[0] - s.a[0];
       const pz = p[1] - s.a[1];
@@ -103,10 +130,44 @@ export class FloorMap {
     return this.rooms.find((r) => pointInPolygon(p, r.points)) ?? null;
   }
 
-  /** A path from a to b through doors (Dijkstra over the door points), or null when b cannot be reached. */
+  /**
+   * A path from a to b through doors and around furniture (Dijkstra over the door points and the corners of the
+   * furniture near the way), or null when b cannot be reached. A goal on a piece of furniture (the cat's place on the
+   * sofa) is reached from the free floor beside it with a last hop.
+   */
   path(a: Vec2, b: Vec2): Vec2[] | null {
     if (this.clear(a, b)) return [b];
-    const nodes: Vec2[] = [a, b, ...this.doors.flatMap((d) => d.p).filter((p) => !this.blocked(p))];
+    // starting on a piece of furniture (the cat on the sofa): a hop down to the free floor first
+    if (this.obstacles.length && !this.wallAt(a) && this.obstacleAt(a)) {
+      const down = this.freeNear(a);
+      if (down !== a) {
+        const way = this.path(down, b);
+        return way ? [down, ...way] : null;
+      }
+    }
+    if (this.obstacles.length && !this.wallAt(b) && this.obstacleAt(b)) {
+      const beside = this.freeNear(b);
+      if (beside !== b) {
+        const way = this.path(a, beside);
+        return way ? [...way, b] : null;
+      }
+    }
+    // corners of the furniture along the way, a little outside it (the far ones only cost time)
+    const ab = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const corners = this.obstacles
+      .filter((o) => distanceToSegment(o.c, a, b) < 2.5 + Math.max(o.hw, o.hd) || ab > 12)
+      .flatMap((o) => {
+        const m = RADIUS + 0.12;
+        const v: Vec2 = [-o.u[1], o.u[0]];
+        return [
+          [-1, -1],
+          [1, -1],
+          [1, 1],
+          [-1, 1],
+        ].map(([sx, sz]) => [o.c[0] + o.u[0] * sx * (o.hw + m) + v[0] * sz * (o.hd + m), o.c[1] + o.u[1] * sx * (o.hw + m) + v[1] * sz * (o.hd + m)] as Vec2);
+      })
+      .filter((p) => !this.blocked(p));
+    const nodes: Vec2[] = [a, b, ...this.doors.flatMap((d) => d.p).filter((p) => !this.blocked(p)), ...corners];
     const n = nodes.length;
     const dist = new Array<number>(n).fill(Infinity);
     const prev = new Array<number>(n).fill(-1);
@@ -207,6 +268,14 @@ export class FloorMap {
     }
     return p;
   }
+}
+
+function distanceToSegment(p: Vec2, a: Vec2, b: Vec2): number {
+  const ex = b[0] - a[0];
+  const ez = b[1] - a[1];
+  const l2 = ex * ex + ez * ez || 1;
+  const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * ex + (p[1] - a[1]) * ez) / l2));
+  return Math.hypot(p[0] - (a[0] + ex * t), p[1] - (a[1] + ez * t));
 }
 
 function area(r: Room): number {

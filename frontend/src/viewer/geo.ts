@@ -40,8 +40,9 @@ export class GeoBuffer {
     this.c.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
     this.f.push(fold, fold, fold);
     // without explicit uvs, point into an empty spot of the texture
-    this.uv?.push(...(uv ?? [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]));
-    this.tile?.push(...tile, ...tile, ...tile);
+    // no `a?.b(...x)`: old Fire-tablet WebViews (before Chrome 91) fail on it (see build.mjs)
+    if (this.uv) this.uv.push(...(uv ?? [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]));
+    if (this.tile) this.tile.push(...tile, ...tile, ...tile);
   }
 
   get count(): number {
@@ -133,8 +134,8 @@ export function cutAbove(buf: GeoBuffer, fromTri: number, cut: number, fold: num
       buf.p.push(...v.p);
       buf.c.push(...v.c);
       buf.f.push(f);
-      buf.uv?.push(...(v.uv ?? [0.5, 0.5]));
-      buf.tile?.push(...(v.tile ?? [0, 1]));
+      if (buf.uv) buf.uv.push(...(v.uv ?? [0.5, 0.5]));
+      if (buf.tile) buf.tile.push(...(v.tile ?? [0, 1]));
     }
     return tri;
   };

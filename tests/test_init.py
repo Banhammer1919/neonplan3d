@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
@@ -154,6 +155,7 @@ async def test_opening_fields_get_defaults(hass: HomeAssistant, hass_ws_client) 
         "wall": None,
         "mark": None,
         "confirm": False,
+        "sill_board": "auto",
     }
     assert got[1]["hinge"] == "right" and got[1]["cover"] == "cover.x" and got[1]["contact"] == "none"
 
@@ -511,3 +513,23 @@ async def test_panel_and_card_are_registered_and_removed(hass: HomeAssistant, mo
     await hass.async_block_till_done()
     mock_frontend["remove_panel"].assert_called_once_with(hass, "neonplan3d")
     mock_frontend["remove_js"].assert_called_once_with(hass, url)
+
+
+async def test_frontend_files_are_served_without_caching(hass: HomeAssistant, hass_client) -> None:
+    """A reload shows a new bundle: no-cache (and a 304 when unchanged); nothing outside the folder."""
+    await _setup(hass)
+    client = await hass_client()
+    res = await client.get("/neonplan3d_static/neonplan3d.js?v=1")
+    assert res.status == 200
+    assert res.headers["Cache-Control"] == "no-cache"
+    etag = res.headers.get("ETag")
+    assert etag
+    again = await client.get("/neonplan3d_static/neonplan3d.js", headers={"If-None-Match": etag})
+    assert again.status == 304
+    assert (await client.get("/neonplan3d_static/../manifest.json")).status in (403, 404)
+    assert (await client.get("/neonplan3d_static/nothing.js")).status == 404
+    # the card loader comes from our own path, nothing is written into the user's www folder
+    loader = await client.get("/neonplan3d_static/neonplan3d-loader.js?v=1")
+    assert loader.status == 200
+    assert 'const tag = "neonplan3d-card";' in await loader.text()
+    assert not (Path(hass.config.path("www")) / "neonplan3d").exists()
